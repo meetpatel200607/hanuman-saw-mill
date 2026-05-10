@@ -511,6 +511,27 @@ const NEW_ORDER_LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",m
 function NewOrder({user,onAdd,toast2}){
   const [f,setF]=useState(NEW_ORDER_DEF);
   const [done,setDone]=useState(null);
+  // Refs for Enter-key navigation (in tab order)
+  const r={
+    customer:useRef(null),mobile:useRef(null),address:useRef(null),
+    product:useRef(null),wood:useRef(null),
+    dimL:useRef(null),dimW:useRef(null),dimT:useRef(null),
+    qty:useRef(null),total:useRef(null),advance:useRef(null),
+    delivery:useRef(null),notes:useRef(null),submit:useRef(null)
+  };
+  // Ordered sequence for Enter navigation
+  const TAB_ORDER=["customer","mobile","address","product","wood","dimL","dimW","dimT","qty","total","advance","delivery","notes","submit"];
+  const focusNext=(current)=>{
+    const idx=TAB_ORDER.indexOf(current);
+    if(idx===-1) return;
+    for(let i=idx+1;i<TAB_ORDER.length;i++){
+      const el=r[TAB_ORDER[i]]&&r[TAB_ORDER[i]].current;
+      if(el){el.focus();break;}
+    }
+  };
+  const onKey=(field)=>(e)=>{
+    if(e.key==="Enter"){e.preventDefault();focusNext(field);}
+  };
   const upd=(k,v)=>setF(p=>{const n={...p,[k]:v};if(k==="advance"||k==="total")n.pending=Math.max(0,Number(n.total||0)-Number(n.advance||0)).toString();return n;});
   const sub=e=>{
     e.preventDefault();
@@ -544,25 +565,25 @@ function NewOrder({user,onAdd,toast2}){
         <div style={{fontWeight:700,fontSize:15,marginBottom:18}}>Create New Order</div>
         <form onSubmit={sub}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:13}}>
-            <div><label style={lbl}>Customer Name *</label><input className="inp" value={f.customer} onChange={e=>upd("customer",e.target.value)} placeholder="Full name"/></div>
-            <div><label style={lbl}>Mobile Number *</label><div style={{display:"flex",gap:8}}><input className="inp" value={f.mobile} onChange={e=>upd("mobile",e.target.value)} placeholder="10-digit mobile" style={{flex:1}}/>{f.mobile&&f.mobile.length>=10&&<a href={"tel:"+f.mobile} className="btn btn-green" style={{padding:"10px 14px",textDecoration:"none",whiteSpace:"nowrap"}}><i className="ti ti-phone"/>Call</a>}</div></div>
-            <div><label style={lbl}>Address (optional)</label><input className="inp" value={f.address} onChange={e=>upd("address",e.target.value)} placeholder="Optional"/></div>
+            <div><label style={lbl}>Customer Name *</label><input ref={r.customer} className="inp" value={f.customer} onChange={e=>upd("customer",e.target.value)} onKeyDown={onKey("customer")} placeholder="Full name"/></div>
+            <div><label style={lbl}>Mobile Number *</label><div style={{display:"flex",gap:8}}><input ref={r.mobile} className="inp" value={f.mobile} onChange={e=>upd("mobile",e.target.value)} onKeyDown={onKey("mobile")} placeholder="10-digit mobile" style={{flex:1}}/>{f.mobile&&f.mobile.length>=10&&<a href={"tel:"+f.mobile} className="btn btn-green" style={{padding:"10px 14px",textDecoration:"none",whiteSpace:"nowrap"}}><i className="ti ti-phone"/>Call</a>}</div></div>
+            <div><label style={lbl}>Address (optional)</label><input ref={r.address} className="inp" value={f.address} onChange={e=>upd("address",e.target.value)} onKeyDown={onKey("address")} placeholder="Optional"/></div>
             <div><label style={lbl}>Product Type *</label>
-              <select className="inp" value={f.product} onChange={e=>upd("product",e.target.value)}>{PRODUCTS.map(p=><option key={p}>{p}</option>)}</select></div>
+              <select ref={r.product} className="inp" value={f.product} onChange={e=>upd("product",e.target.value)} onKeyDown={onKey("product")}>{PRODUCTS.map(p=><option key={p}>{p}</option>)}</select></div>
             <div><label style={lbl}>Wood Type *</label>
-              <select className="inp" value={f.wood} onChange={e=>upd("wood",e.target.value)}>{WOODS.map(w=><option key={w}>{w}</option>)}</select></div>
-            <div style={{gridColumn:"span 2"}}><label style={lbl}>Size / Dimensions (in inches) *</label><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Length (inches)</label><input type="number" step="0.1" className="inp" value={f.dimL} onChange={e=>upd("dimL",e.target.value)} placeholder='e.g. 10' id="dimL" onKeyUp={e=>{if(e.target.value.length>=e.target.value.toString().length&&e.target.value)document.getElementById('dimW').focus()}}/></div><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Width (inches)</label><input type="number" step="0.1" className="inp" value={f.dimW} onChange={e=>upd("dimW",e.target.value)} placeholder='e.g. 4'/></div><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Thickness (inches)</label><input type="number" step="0.1" className="inp" value={f.dimT} onChange={e=>upd("dimT",e.target.value)} placeholder='e.g. 2'/></div></div></div>
-            <div><label style={lbl}>Quantity *</label><input type="number" className="inp" value={f.qty} onChange={e=>upd("qty",e.target.value)} placeholder="Units"/></div>
-            <div><label style={lbl}>Total Amount (₹)</label><input type="number" className="inp" value={f.total} onChange={e=>upd("total",e.target.value)} placeholder="0"/></div>
-            <div><label style={lbl}>Advance Paid (₹)</label><input type="number" className="inp" value={f.advance} onChange={e=>upd("advance",e.target.value)} placeholder="0"/></div>
-            <div><label style={lbl}>Pending Amount (₹)</label><input type="number" className="inp" value={f.pending} onChange={e=>upd("pending",e.target.value)} placeholder="Auto-calculated"/></div>
-            <div><label style={lbl}>Delivery Date</label><input type="date" className="inp" value={f.delivery} onChange={e=>upd("delivery",e.target.value)}/></div>
+              <select ref={r.wood} className="inp" value={f.wood} onChange={e=>upd("wood",e.target.value)} onKeyDown={onKey("wood")}>{WOODS.map(w=><option key={w}>{w}</option>)}</select></div>
+            <div style={{gridColumn:"span 2"}}><label style={lbl}>Size / Dimensions (in inches) *</label><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Length (inches)</label><input ref={r.dimL} type="number" step="0.1" className="inp" value={f.dimL} onChange={e=>upd("dimL",e.target.value)} onKeyDown={onKey("dimL")} placeholder='e.g. 10'/></div><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Width (inches)</label><input ref={r.dimW} type="number" step="0.1" className="inp" value={f.dimW} onChange={e=>upd("dimW",e.target.value)} onKeyDown={onKey("dimW")} placeholder='e.g. 4'/></div><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Thickness (inches)</label><input ref={r.dimT} type="number" step="0.1" className="inp" value={f.dimT} onChange={e=>upd("dimT",e.target.value)} onKeyDown={onKey("dimT")} placeholder='e.g. 2'/></div></div></div>
+            <div><label style={lbl}>Quantity *</label><input ref={r.qty} type="number" className="inp" value={f.qty} onChange={e=>upd("qty",e.target.value)} onKeyDown={onKey("qty")} placeholder="Units"/></div>
+            <div><label style={lbl}>Total Amount (₹)</label><input ref={r.total} type="number" className="inp" value={f.total} onChange={e=>upd("total",e.target.value)} onKeyDown={onKey("total")} placeholder="0"/></div>
+            <div><label style={lbl}>Advance Paid (₹)</label><input ref={r.advance} type="number" className="inp" value={f.advance} onChange={e=>upd("advance",e.target.value)} onKeyDown={onKey("advance")} placeholder="0"/></div>
+            <div><label style={lbl}>Pending Amount (₹)</label><input type="number" className="inp" value={f.pending} onChange={e=>upd("pending",e.target.value)} placeholder="Auto-calculated" readOnly style={{background:"#fafaf8",color:"#999"}}/></div>
+            <div><label style={lbl}>Delivery Date</label><input ref={r.delivery} type="date" className="inp" value={f.delivery} onChange={e=>upd("delivery",e.target.value)} onKeyDown={onKey("delivery")}/></div>
             <div style={{gridColumn:"span 2"}}>
               <label style={lbl}>Notes / Special Instructions</label>
-              <textarea className="inp" rows={2} value={f.notes} onChange={e=>upd("notes",e.target.value)} placeholder="Special instructions..."/>
+              <textarea ref={r.notes} className="inp" rows={2} value={f.notes} onChange={e=>upd("notes",e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();r.submit.current&&r.submit.current.focus();}}} placeholder="Special instructions... (Shift+Enter for new line)"/>
             </div>
           </div>
-          <button type="submit" className="btn btn-red" style={{marginTop:18}}><i className="ti ti-check"/>Create Order & Generate QR</button>
+          <button ref={r.submit} type="submit" className="btn btn-red" style={{marginTop:18}}><i className="ti ti-check"/>Create Order & Generate QR</button>
         </form>
       </div>
     </div>
