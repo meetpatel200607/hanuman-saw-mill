@@ -73,7 +73,7 @@ const USERS=[
   {id:3,name:"Suresh Factory",username:"factory",password:"arvind2026",role:"Factory Staff"},
   {id:4,name:"Accounts User",username:"accounts",password:"acc123",role:"Accountant"},
 ];
-const WOODS=["Teak","Sal","Pine","Eucalyptus","Mango","Neem","Sagwan","Deodar","Rosewood","Bamboo"];
+const WOODS=["Teak","Sal","Pine","Eucalyptus","Mango","Neem","Sagwan","Deodar","Rosewood","Bamboo","Khair"];
 const PRODUCTS=["Umbra Patti","Door Frame","Window Frame","Plank","Batten","Rafter","Purlin","Custom"];
 const PAY_M=["Cash","UPI","Bank Transfer"];
 const S={PROD:"In Production",RECV:"Received at Office",DELI:"Delivered & Paid"};
@@ -506,7 +506,7 @@ function Dashboard({orders,goto,user}){
 }
 
 // ── NEW ORDER ──
-const NEW_ORDER_DEF={customer:"",mobile:"",address:"",product:PRODUCTS[0],wood:WOODS[0],size:"",qty:"",advance:"",pending:"",total:"",delivery:"",notes:""};
+const NEW_ORDER_DEF={customer:"",mobile:"",address:"",product:PRODUCTS[0],wood:WOODS[0],dimL:"",dimW:"",dimT:"",size:"",qty:"",advance:"",pending:"",total:"",delivery:"",notes:""};
 const NEW_ORDER_LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBottom:4};
 function NewOrder({user,onAdd,toast2}){
   const [f,setF]=useState(NEW_ORDER_DEF);
@@ -514,8 +514,8 @@ function NewOrder({user,onAdd,toast2}){
   const upd=(k,v)=>setF(p=>{const n={...p,[k]:v};if(k==="advance"||k==="total")n.pending=Math.max(0,Number(n.total||0)-Number(n.advance||0)).toString();return n;});
   const sub=e=>{
     e.preventDefault();
-    if(!f.customer||!f.mobile||!f.size||!f.qty){toast2("Fill all required fields","err");return;}
-    const o={...f,id:genId(),status:S.PROD,created:now2(),createdBy:user.name,qty:Number(f.qty),advance:Number(f.advance)||0,pending:Number(f.pending)||0,total:Number(f.total)||0,payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:""};
+    if(!f.customer||!f.mobile||!f.dimL||!f.dimW||!f.dimT||!f.qty){toast2("Fill all required fields","err");return;}
+    const sizeStr=f.dimL+'"'+'x'+f.dimW+'"'+'x'+f.dimT+'"';const o={...f,size:sizeStr,id:genId(),status:S.PROD,created:now2(),createdBy:user.name,qty:Number(f.qty),advance:Number(f.advance)||0,pending:Number(f.pending)||0,total:Number(f.total)||0,payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:""};
     onAdd(o);setDone(o);
   };
   if(done) return(
@@ -545,13 +545,13 @@ function NewOrder({user,onAdd,toast2}){
         <form onSubmit={sub}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:13}}>
             <div><label style={lbl}>Customer Name *</label><input className="inp" value={f.customer} onChange={e=>upd("customer",e.target.value)} placeholder="Full name"/></div>
-            <div><label style={lbl}>Mobile Number *</label><input className="inp" value={f.mobile} onChange={e=>upd("mobile",e.target.value)} placeholder="10-digit mobile"/></div>
+            <div><label style={lbl}>Mobile Number *</label><div style={{display:"flex",gap:8}}><input className="inp" value={f.mobile} onChange={e=>upd("mobile",e.target.value)} placeholder="10-digit mobile" style={{flex:1}}/>{f.mobile&&f.mobile.length>=10&&<a href={"tel:"+f.mobile} className="btn btn-green" style={{padding:"10px 14px",textDecoration:"none",whiteSpace:"nowrap"}}><i className="ti ti-phone"/>Call</a>}</div></div>
             <div><label style={lbl}>Address (optional)</label><input className="inp" value={f.address} onChange={e=>upd("address",e.target.value)} placeholder="Optional"/></div>
             <div><label style={lbl}>Product Type *</label>
               <select className="inp" value={f.product} onChange={e=>upd("product",e.target.value)}>{PRODUCTS.map(p=><option key={p}>{p}</option>)}</select></div>
             <div><label style={lbl}>Wood Type *</label>
               <select className="inp" value={f.wood} onChange={e=>upd("wood",e.target.value)}>{WOODS.map(w=><option key={w}>{w}</option>)}</select></div>
-            <div><label style={lbl}>Size / Dimensions *</label><input className="inp" value={f.size} onChange={e=>upd("size",e.target.value)} placeholder='e.g. 2"x4"x10ft'/></div>
+            <div style={{gridColumn:"span 2"}}><label style={lbl}>Size / Dimensions (in inches) *</label><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Length (inches)</label><input type="number" step="0.1" className="inp" value={f.dimL} onChange={e=>upd("dimL",e.target.value)} placeholder='e.g. 10'/></div><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Width (inches)</label><input type="number" step="0.1" className="inp" value={f.dimW} onChange={e=>upd("dimW",e.target.value)} placeholder='e.g. 4'/></div><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Thickness (inches)</label><input type="number" step="0.1" className="inp" value={f.dimT} onChange={e=>upd("dimT",e.target.value)} placeholder='e.g. 2'/></div></div></div>
             <div><label style={lbl}>Quantity *</label><input type="number" className="inp" value={f.qty} onChange={e=>upd("qty",e.target.value)} placeholder="Units"/></div>
             <div><label style={lbl}>Total Amount (₹)</label><input type="number" className="inp" value={f.total} onChange={e=>upd("total",e.target.value)} placeholder="0"/></div>
             <div><label style={lbl}>Advance Paid (₹)</label><input type="number" className="inp" value={f.advance} onChange={e=>upd("advance",e.target.value)} placeholder="0"/></div>
