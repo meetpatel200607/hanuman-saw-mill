@@ -1,0 +1,993 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<title>Hanuman Saw Mill</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css"/>
+<script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<!-- Firebase -->
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<style>
+  *{box-sizing:border-box;margin:0;padding:0;}
+  body{font-family:'Segoe UI',sans-serif;background:#f5f5f3;}
+  ::-webkit-scrollbar{width:4px}::-webkit-scrollbar-thumb{background:#ddd;border-radius:4px}
+  .btn{display:inline-flex;align-items:center;gap:6px;padding:10px 18px;border-radius:10px;font-size:13.5px;font-weight:600;cursor:pointer;border:none;transition:all .15s;font-family:inherit;}
+  .btn:active{transform:scale(.97)}
+  .btn-red{background:#cc0000;color:#fff}.btn-red:hover{background:#aa0000}
+  .btn-green{background:#1d9e75;color:#fff}.btn-green:hover{background:#0f6e56}
+  .btn-outline{background:#fff;color:#333;border:1.5px solid #ddd}.btn-outline:hover{border-color:#cc0000;color:#cc0000}
+  .inp{width:100%;padding:10px 12px;border:1.5px solid #e0ddd8;border-radius:10px;font-size:13.5px;font-family:inherit;outline:none;transition:border .15s;}
+  .inp:focus{border-color:#cc0000}
+  .card{background:#fff;border-radius:14px;border:1px solid #eeebe6;padding:20px}
+  .nav-btn{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;cursor:pointer;font-size:13.5px;font-weight:500;color:#888;transition:all .15s;border:none;background:none;width:100%;text-align:left;font-family:inherit;}
+  .nav-btn:hover{background:#fff3f3;color:#cc0000}
+  .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:600}
+  @media(max-width:700px){.sidebar{position:fixed;left:-230px;top:0;height:100vh;z-index:200;transition:left .25s}.sidebar.open{left:0}.overlay{display:block!important}}
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<!-- ██████████████████████████████████████████████████
+     FIREBASE SETUP — Replace the values below with
+     your own Firebase project config.
+     Steps:  1. Go to https://console.firebase.google.com
+             2. Create a project (free Spark plan)
+             3. Add a Web app → copy the firebaseConfig
+             4. Enable Firestore Database (test mode)
+             5. Paste your values below
+     █████████████████████████████████████████████████ -->
+<script>
+const FIREBASE_CONFIG = {
+  apiKey:            "AIzaSyDKCSTBCyNdgA-p8znwxvct2cbuf7pyFdQ",
+  authDomain:        "hanumansawmill06.firebaseapp.com",
+  projectId:         "hanumansawmill06",
+  storageBucket:     "hanumansawmill06.firebasestorage.app",
+  messagingSenderId: "448585552357",
+  appId:             "1:448585552357:web:d673cce35f7c35e4fc5f0c"
+};
+
+// Detect if config has been filled in
+const FIREBASE_READY = !Object.values(FIREBASE_CONFIG).some(v => v.includes("PASTE_YOUR"));
+
+if(FIREBASE_READY){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  window.db = firebase.firestore();
+} else {
+  window.db = null;
+}
+</script>
+
+<script type="text/babel">
+const {useState,useRef,useEffect,useCallback}=React;
+
+// ── DATA ──
+const USERS=[
+  {id:1,name:"Admin User",username:"admin",password:"admin123",role:"Admin"},
+  {id:2,name:"Ravi Kumar",username:"office",password:"office123",role:"Office Staff"},
+  {id:3,name:"Suresh Factory",username:"factory",password:"factory123",role:"Factory Staff"},
+  {id:4,name:"Accounts User",username:"accounts",password:"acc123",role:"Accountant"},
+];
+const WOODS=["Teak","Sal","Pine","Eucalyptus","Mango","Neem","Sagwan","Deodar","Rosewood","Bamboo"];
+const PRODUCTS=["Umbra Patti","Door Frame","Window Frame","Plank","Batten","Rafter","Purlin","Custom"];
+const PAY_M=["Cash","UPI","Bank Transfer"];
+const S={PROD:"In Production",RECV:"Received at Office",DELI:"Delivered & Paid"};
+
+const genId=()=>"HSM-"+Math.random().toString(36).toUpperCase().slice(2,8);
+const now2=()=>new Date().toLocaleString("en-IN");
+const fmtM=n=>"₹"+Number(n||0).toLocaleString("en-IN");
+const fmtD=d=>d?new Date(d).toLocaleDateString("en-IN"):"—";
+
+const SEED=[
+  {id:"HSM-DEMO1",customer:"Ramesh Sharma",mobile:"9876543210",address:"12 Gandhi Nagar",product:"Umbra Patti",wood:"Teak",size:'2"x4"x10ft',qty:50,advance:5000,pending:7500,total:12500,delivery:"2026-05-20",notes:"Smooth finish",status:S.PROD,created:now2(),createdBy:"Ravi Kumar",payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:""},
+  {id:"HSM-DEMO2",customer:"Priya Patel",mobile:"9988776655",address:"Pune",product:"Door Frame",wood:"Sal",size:'4"x3"x7ft',qty:10,advance:2000,pending:3000,total:5000,delivery:"2026-05-15",notes:"",status:S.RECV,created:now2(),createdBy:"Ravi Kumar",payMethod:"",payAt:"",receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:"",deliveredBy:""},
+  {id:"HSM-DEMO3",customer:"Deepak Verma",mobile:"9123456789",address:"Nagpur",product:"Plank",wood:"Pine",size:'1"x6"x12ft',qty:100,advance:8000,pending:0,total:8000,delivery:"2026-05-10",notes:"",status:S.DELI,created:now2(),createdBy:"Ravi Kumar",payMethod:"UPI",payAt:now2(),receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:now2(),deliveredBy:"Ravi Kumar"},
+];
+
+// ── QR CONTENT BUILDER ──
+function buildQRText(o){
+  // Keep it concise so QR stays scannable
+  return "HSM ORDER\n"+
+    "ID:"+o.id+"\n"+
+    "Customer:"+o.customer+"\n"+
+    "Mobile:"+o.mobile+"\n"+
+    "Product:"+o.product+" ("+o.wood+")\n"+
+    "Size:"+o.size+" Qty:"+o.qty+"\n"+
+    "Total:"+fmtM(o.total)+"\n"+
+    "Advance:"+fmtM(o.advance)+"\n"+
+    "Pending:"+fmtM(o.pending)+"\n"+
+    "Delivery:"+(o.delivery?fmtD(o.delivery):"—")+"\n"+
+    "Status:"+o.status+
+    (o.notes?"\nNotes:"+o.notes:"");
+}
+
+// ── DRAW QR ON CANVAS ──
+function drawQROnCanvas(canvas, text, size){
+  try{
+    const qr=qrcode(0,"M");
+    qr.addData(text);
+    qr.make();
+    const count=qr.getModuleCount();
+    const cell=Math.floor(size/count);
+    const actual=cell*count;
+    canvas.width=actual;
+    canvas.height=actual;
+    const ctx=canvas.getContext("2d");
+    ctx.fillStyle="#ffffff";
+    ctx.fillRect(0,0,actual,actual);
+    ctx.fillStyle="#000000";
+    for(let r=0;r<count;r++){
+      for(let c=0;c<count;c++){
+        if(qr.isDark(r,c)){
+          ctx.fillRect(c*cell,r*cell,cell,cell);
+        }
+      }
+    }
+    return canvas;
+  }catch(e){
+    console.error("QR draw error",e);
+    return null;
+  }
+}
+
+// ── REAL QR COMPONENT ──
+function QRSvg({order,size=180}){
+  const ref=useRef(null);
+  useEffect(()=>{
+    if(!ref.current||!order) return;
+    const text=buildQRText(order);
+    drawQROnCanvas(ref.current, text, size);
+  },[order&&order.id, size]);
+  if(!order) return null;
+  return(
+    <canvas ref={ref} style={{display:"block",imageRendering:"pixelated",width:size,height:size}}/>
+  );
+}
+
+// ── DOWNLOAD QR ──
+function downloadQR(o){
+  const size=220;
+  const padX=24, padTop=56, padBot=44;
+  const W=size+padX*2, H=size+padTop+padBot;
+  const out=document.createElement("canvas");
+  out.width=W; out.height=H;
+  const ctx=out.getContext("2d");
+
+  // background + border
+  ctx.fillStyle="#ffffff";
+  ctx.fillRect(0,0,W,H);
+  ctx.strokeStyle="#cc0000";
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.roundRect(2,2,W-4,H-4,12);
+  ctx.stroke();
+
+  // logo
+  ctx.fillStyle="#cc0000";
+  ctx.font="bold 22px Arial";
+  ctx.textAlign="center";
+  ctx.fillText("HSM",W/2,28);
+  ctx.fillStyle="#999999";
+  ctx.font="8px Arial";
+  ctx.fillText("HANUMAN SAW MILL",W/2,40);
+
+  // draw QR onto a temp canvas then blit
+  const tmp=document.createElement("canvas");
+  const drawn=drawQROnCanvas(tmp, buildQRText(o), size);
+  if(!drawn){alert("QR generation failed");return;}
+  ctx.drawImage(tmp, padX, padTop, size, size);
+
+  // order id + customer
+  ctx.fillStyle="#1a1a1a";
+  ctx.font="bold 12px Arial";
+  ctx.fillText(o.id, W/2, padTop+size+16);
+  ctx.fillStyle="#555555";
+  ctx.font="10px Arial";
+  ctx.fillText(o.customer+" · "+o.mobile, W/2, padTop+size+30);
+
+  const link=document.createElement("a");
+  link.download="QR-"+o.id+".png";
+  link.href=out.toDataURL("image/png");
+  link.click();
+}
+
+function printQR(o){
+  const size=200;
+  const tmp=document.createElement("canvas");
+  const drawn=drawQROnCanvas(tmp, buildQRText(o), size);
+  if(!drawn){alert("QR generation failed");return;}
+  const qrDataUrl=tmp.toDataURL("image/png");
+  const w=window.open("","_blank");
+  w.document.write(`<!DOCTYPE html><html><head><title>QR – ${o.id}</title>
+  <style>body{font-family:Arial,sans-serif;padding:20px;background:#fff;text-align:center}
+  .box{border:2px solid #cc0000;border-radius:12px;display:inline-block;padding:16px 20px;width:280px}
+  .logo{font-size:26px;font-weight:900;color:#cc0000}
+  table{width:100%;font-size:11px;text-align:left;border-collapse:collapse}
+  td{padding:3px 4px}td:first-child{color:#888}
+  @media print{body{margin:0}}</style></head>
+  <body onload="window.print()">
+  <div class="box">
+    <div class="logo">HSM</div>
+    <div style="font-size:10px;color:#888;margin-bottom:8px">HANUMAN SAW MILL</div>
+    <img src="${qrDataUrl}" width="200" height="200" style="display:block;margin:0 auto 8px;image-rendering:pixelated;"/>
+    <div style="font-size:13px;font-weight:700;margin:6px 0">${o.id}</div>
+    <table>
+      <tr><td>Customer</td><td><b>${o.customer}</b></td></tr>
+      <tr><td>Mobile</td><td>${o.mobile}</td></tr>
+      <tr><td>Product</td><td>${o.product} – ${o.wood}</td></tr>
+      <tr><td>Size</td><td>${o.size}</td></tr>
+      <tr><td>Qty</td><td>${o.qty}</td></tr>
+      <tr><td>Total</td><td>${fmtM(o.total)}</td></tr>
+      <tr><td>Advance</td><td>${fmtM(o.advance)}</td></tr>
+      <tr><td>Pending</td><td style="color:#cc0000"><b>${fmtM(o.pending)}</b></td></tr>
+      <tr><td>Delivery</td><td>${fmtD(o.delivery)}</td></tr>
+    </table>
+  </div>
+  </body></html>`);
+  w.document.close();
+}
+
+function StatusBadge({s}){
+  const m={[S.PROD]:{bg:"#faeeda",color:"#854f0b"},[S.RECV]:{bg:"#e1f5ee",color:"#0f6e56"},[S.DELI]:{bg:"#e6f1fb",color:"#185fa5"}};
+  const st=m[s]||m[S.PROD];
+  return <span className="badge" style={{background:st.bg,color:st.color}}>{s}</span>;
+}
+
+function printInvoice(o){
+  const w=window.open("","_blank");
+  w.document.write(`<!DOCTYPE html><html><head><title>Invoice – ${o.id}</title>
+  <style>body{font-family:Arial;padding:32px;color:#111}h1{color:#cc0000;font-size:30px}
+  .hdr{display:flex;justify-content:space-between;border-bottom:2px solid #cc0000;padding-bottom:14px;margin-bottom:18px}
+  table{width:100%;border-collapse:collapse;font-size:13px}th{background:#cc0000;color:#fff;padding:8px;text-align:left}
+  td{padding:8px;border-bottom:1px solid #eee}.tot{font-weight:700;color:#cc0000}
+  @media print{body{padding:16px}}</style></head>
+  <body onload="window.print()">
+  <div class="hdr"><div><h1>HSM</h1><b>Hanuman Saw Mill</b><p style="color:#888;font-size:11px">Wooden Umbra Patti Manufacturers</p></div>
+  <div style="text-align:right"><b>INVOICE</b><br>${o.id}<br><span style="color:#888;font-size:12px">${o.deliveredAt||now2()}</span></div></div>
+  <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:16px">
+  <div><b>Bill To:</b><br>${o.customer}<br>${o.mobile}${o.address?'<br>'+o.address:''}</div>
+  <div style="text-align:right"><b>Payment:</b> ${o.payMethod||'—'}<br><b>Delivery:</b> ${fmtD(o.delivery)}</div></div>
+  <table><thead><tr><th>Product</th><th>Wood</th><th>Size</th><th>Qty</th><th>Total</th></tr></thead>
+  <tbody><tr><td>${o.product}</td><td>${o.wood}</td><td>${o.size}</td><td>${o.qty}</td><td>${fmtM(o.total)}</td></tr></tbody></table>
+  <div style="text-align:right;margin-top:16px">
+  <table style="width:220px;margin-left:auto;font-size:13px">
+  <tr><td>Total</td><td style="text-align:right">${fmtM(o.total)}</td></tr>
+  <tr><td>Advance Paid</td><td style="text-align:right">${fmtM(o.advance)}</td></tr>
+  <tr class="tot"><td>Balance</td><td style="text-align:right">${fmtM(o.pending)}</td></tr>
+  </table></div>
+  <div style="margin-top:32px;text-align:center;font-size:11px;color:#888">Thank you! | Hanuman Saw Mill</div>
+  </body></html>`);
+  w.document.close();
+}
+
+// ── LOGIN ──
+function Login({onLogin}){
+  const [u,setU]=useState(""),[p,setP]=useState(""),[err,setErr]=useState("");
+  const go=e=>{e.preventDefault();const f=USERS.find(x=>x.username===u&&x.password===p);f?onLogin(f):setErr("Invalid username or password");};
+  return(
+    <div style={{minHeight:"100vh",background:"#1a1a1a",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
+      <div style={{background:"#fff",borderRadius:20,padding:"40px 32px",width:"100%",maxWidth:360,textAlign:"center"}}>
+        <div style={{fontSize:54,fontWeight:900,color:"#cc0000",letterSpacing:3,lineHeight:1}}>HSM</div>
+        <div style={{fontSize:11,color:"#aaa",letterSpacing:2,marginTop:4,marginBottom:28}}>HANUMAN SAW MILL</div>
+        <form onSubmit={go} style={{display:"flex",flexDirection:"column",gap:12,textAlign:"left"}}>
+          <div><label style={{fontSize:12,fontWeight:600,color:"#666",display:"block",marginBottom:4}}>Username</label>
+            <input className="inp" value={u} onChange={e=>setU(e.target.value)} placeholder="Enter username" autoFocus/></div>
+          <div><label style={{fontSize:12,fontWeight:600,color:"#666",display:"block",marginBottom:4}}>Password</label>
+            <input type="password" className="inp" value={p} onChange={e=>setP(e.target.value)} placeholder="Enter password"/></div>
+          {err&&<div style={{color:"#cc0000",fontSize:12,fontWeight:500}}>{err}</div>}
+          <button type="submit" className="btn btn-red" style={{justifyContent:"center",marginTop:4}}>Sign In</button>
+        </form>
+
+      </div>
+    </div>
+  );
+}
+
+// ── SHELL ──
+function App(){
+  const [user,setUser]=useState(null);
+  const [page,setPage]=useState("dashboard");
+  const [orders,setOrders]=useState([]);
+  const [toast,setToast]=useState(null);
+  const [menuOpen,setMenuOpen]=useState(false);
+  const [loading,setLoading]=useState(false);
+  const [dbMode,setDbMode]=useState(!!window.db); // true=firebase, false=local
+
+  // ── Firebase real-time listener ──
+  useEffect(()=>{
+    if(!window.db||!user) return;
+    setLoading(true);
+    const unsub=window.db.collection("orders")
+      .orderBy("createdTs","desc")
+      .onSnapshot(snap=>{
+        setOrders(snap.docs.map(d=>({...d.data(),id:d.id})));
+        setLoading(false);
+      }, err=>{
+        console.error(err);
+        setLoading(false);
+        toast2("DB error: "+err.message,"err");
+      });
+    return ()=>unsub();
+  },[user]);
+
+  // ── Local fallback (no Firebase config yet) ──
+  useEffect(()=>{
+    if(!window.db) setOrders(SEED);
+  },[]);
+
+  const toast2=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
+
+  const addOrder=async o=>{
+    if(window.db){
+      try{
+        const doc={...o,createdTs:firebase.firestore.FieldValue.serverTimestamp()};
+        await window.db.collection("orders").doc(o.id).set(doc);
+        toast2("Order saved to cloud!");
+      }catch(e){toast2("Save failed: "+e.message,"err");}
+    } else {
+      setOrders(p=>[o,...p]);
+      toast2("Order created (local only — Firebase not configured)");
+    }
+  };
+
+  const updOrder=async(id,patch)=>{
+    if(window.db){
+      try{
+        await window.db.collection("orders").doc(id).update(patch);
+      }catch(e){toast2("Update failed: "+e.message,"err");}
+    } else {
+      setOrders(p=>p.map(o=>o.id===id?{...o,...patch}:o));
+    }
+  };
+
+  if(!user) return <Login onLogin={u=>{setUser(u);setPage("dashboard");}}/>;
+
+  const ALL_NAV=[
+    {id:"dashboard",icon:"ti-layout-dashboard",label:"Dashboard",roles:["all"]},
+    {id:"new-order",icon:"ti-plus-circle",label:"New Order",roles:["Admin","Office Staff"]},
+    {id:"orders",icon:"ti-list",label:"All Orders",roles:["all"]},
+    {id:"factory",icon:"ti-tool",label:"Factory View",roles:["Admin","Factory Staff"]},
+    {id:"receive",icon:"ti-qrcode",label:"Receive / Scan",roles:["Admin","Office Staff"]},
+    {id:"deliver",icon:"ti-truck-delivery",label:"Deliver & Pay",roles:["Admin","Office Staff"]},
+    {id:"reports",icon:"ti-report",label:"Reports",roles:["Admin","Accountant"]},
+  ].filter(n=>n.roles.includes("all")||n.roles.includes(user.role));
+
+  const goto=p=>{setPage(p);setMenuOpen(false);};
+
+  return(
+    <div style={{display:"flex",height:"100vh",overflow:"hidden",background:"#f5f5f3"}}>
+      {menuOpen&&<div className="overlay" style={{display:"none",position:"fixed",inset:0,background:"rgba(0,0,0,.4)",zIndex:199}} onClick={()=>setMenuOpen(false)}/>}
+      <aside className={`sidebar${menuOpen?" open":""}`} style={{width:220,background:"#1a1a1a",display:"flex",flexDirection:"column",padding:"18px 10px",flexShrink:0,zIndex:200,overflowY:"auto"}}>
+        <div style={{textAlign:"center",padding:"6px 0 18px",borderBottom:"1px solid #2a2a2a",marginBottom:14}}>
+          <div style={{fontSize:30,fontWeight:900,color:"#cc0000",letterSpacing:2}}>HSM</div>
+          <div style={{fontSize:9,color:"#555",letterSpacing:1.5,marginTop:2}}>HANUMAN SAW MILL</div>
+        </div>
+        <nav style={{flex:1,display:"flex",flexDirection:"column",gap:2}}>
+          {ALL_NAV.map(n=>(
+            <button key={n.id} className="nav-btn" onClick={()=>goto(n.id)}
+              style={page===n.id?{background:"#cc0000",color:"#fff"}:{}}>
+              <i className={`ti ${n.icon}`} style={{fontSize:17}}/>
+              {n.label}
+            </button>
+          ))}
+        </nav>
+        <div style={{borderTop:"1px solid #2a2a2a",paddingTop:12,marginTop:8}}>
+          {/* Cloud sync status */}
+          <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 10px",marginBottom:8}}>
+            <div style={{width:7,height:7,borderRadius:"50%",background:dbMode?"#1d9e75":"#cc0000",flexShrink:0}}/>
+            <div style={{fontSize:10,color:dbMode?"#3d9e75":"#cc6666"}}>{dbMode?"Cloud Sync ON":"Local Only"}</div>
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:8,padding:"4px 10px",marginBottom:8}}>
+            <div style={{width:30,height:30,borderRadius:"50%",background:"#cc0000",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff"}}>{user.name[0]}</div>
+            <div><div style={{fontSize:11,fontWeight:600,color:"#ddd"}}>{user.name}</div><div style={{fontSize:10,color:"#555"}}>{user.role}</div></div>
+          </div>
+          <button className="nav-btn" style={{color:"#666"}} onClick={()=>setUser(null)}>
+            <i className="ti ti-logout" style={{fontSize:16}}/>Sign Out
+          </button>
+        </div>
+      </aside>
+
+      <div style={{flex:1,display:"flex",flexDirection:"column",overflow:"hidden"}}>
+        <header style={{background:"#fff",borderBottom:"1px solid #eeebe6",padding:"12px 20px",display:"flex",alignItems:"center",gap:12,flexShrink:0}}>
+          <button onClick={()=>setMenuOpen(p=>!p)} style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#555",display:"none"}} id="mBtn"><i className="ti ti-menu-2"/></button>
+          <style>{`@media(max-width:700px){#mBtn{display:block!important}}`}</style>
+          <div style={{flex:1}}>
+            <div style={{fontSize:16,fontWeight:700,color:"#1a1a1a"}}>{ALL_NAV.find(n=>n.id===page)?.label||"Dashboard"}</div>
+            <div style={{fontSize:11,color:"#bbb"}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
+          </div>
+          <div style={{background:"#fff8f8",border:"1px solid #ffdddd",borderRadius:8,padding:"3px 10px",fontSize:11,color:"#cc0000",fontWeight:600}}>{user.role}</div>
+        </header>
+
+        {loading&&(
+          <div style={{background:"#fff8f8",borderBottom:"1px solid #ffe0e0",padding:"8px 20px",fontSize:12,color:"#cc0000",display:"flex",alignItems:"center",gap:8}}>
+            <div style={{width:12,height:12,border:"2px solid #cc0000",borderTopColor:"transparent",borderRadius:"50%",animation:"spin 0.8s linear infinite"}}/>
+            Syncing with cloud...
+            <style>{`@keyframes spin{to{transform:rotate(360deg)}}`}</style>
+          </div>
+        )}
+
+        {!dbMode&&(
+          <div style={{background:"#fffbea",borderBottom:"1px solid #ffe58f",padding:"8px 20px",fontSize:12,color:"#7a5c00",display:"flex",alignItems:"center",gap:8"}}>
+            <i className="ti ti-alert-triangle" style={{fontSize:14}}/>
+            Running in local mode — Firebase not configured. Orders are not shared across devices.
+          </div>
+        )}
+
+        <main style={{flex:1,overflow:"auto",padding:20}}>
+          {page==="dashboard"&&<Dashboard orders={orders} goto={goto} user={user}/>}
+          {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2}/>}
+          {page==="orders"&&<OrderList orders={orders} updOrder={updOrder} toast2={toast2} user={user}/>}
+          {page==="factory"&&<Factory orders={orders}/>}
+          {page==="receive"&&<Receive orders={orders} updOrder={updOrder} user={user} toast2={toast2}/>}
+          {page==="deliver"&&<Deliver orders={orders} updOrder={updOrder} user={user} toast2={toast2}/>}
+          {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={orders}/>}
+        </main>
+      </div>
+
+      {toast&&(
+        <div style={{position:"fixed",bottom:24,right:24,background:toast.type==="ok"?"#1d9e75":"#cc0000",color:"#fff",padding:"12px 20px",borderRadius:12,fontSize:13.5,fontWeight:600,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,.15)",maxWidth:320}}>
+          <i className={`ti ${toast.type==="ok"?"ti-check":"ti-alert-circle"}`} style={{marginRight:6}}/>{toast.msg}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DASHBOARD ──
+function Dashboard({orders,goto,user}){
+  const prod=orders.filter(o=>o.status===S.PROD).length;
+  const recv=orders.filter(o=>o.status===S.RECV).length;
+  const deli=orders.filter(o=>o.status===S.DELI).length;
+  const pendAmt=orders.filter(o=>o.status!==S.DELI).reduce((a,o)=>a+Number(o.pending),0);
+  const rev=orders.filter(o=>o.status===S.DELI).reduce((a,o)=>a+Number(o.total),0);
+  const stats=[
+    {l:"Total Orders",v:orders.length,icon:"ti-clipboard-list",c:"#cc0000"},
+    {l:"In Production",v:prod,icon:"ti-tool",c:"#854f0b"},
+    {l:"At Office",v:recv,icon:"ti-building-store",c:"#0f6e56"},
+    {l:"Delivered",v:deli,icon:"ti-circle-check",c:"#185fa5"},
+    ...( ["Admin","Accountant"].includes(user.role)?[
+      {l:"Pending Payment",v:fmtM(pendAmt),icon:"ti-clock-dollar",c:"#a32d2d"},
+      {l:"Total Revenue",v:fmtM(rev),icon:"ti-currency-rupee",c:"#3b6d11"},
+    ]:[]),
+  ];
+  return(
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
+        {stats.map(s=>(
+          <div key={s.l} className="card" style={{padding:"14px 16px"}}>
+            <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
+              <div style={{width:32,height:32,borderRadius:9,background:s.c+"18",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                <i className={`ti ${s.icon}`} style={{color:s.c,fontSize:16}}/>
+              </div>
+              <div style={{fontSize:10.5,color:"#999",fontWeight:500}}>{s.l}</div>
+            </div>
+            <div style={{fontSize:22,fontWeight:700,color:"#1a1a1a"}}>{s.v}</div>
+          </div>
+        ))}
+      </div>
+      <div className="card" style={{marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+          <div style={{fontWeight:700,fontSize:15}}>Recent Orders</div>
+          <button className="btn btn-outline" style={{padding:"6px 12px",fontSize:12}} onClick={()=>goto("orders")}>View All →</button>
+        </div>
+        <div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
+            <thead><tr style={{borderBottom:"1px solid #f0ede8"}}>{["Order ID","Customer","Product","Qty","Amount","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#bbb",fontSize:11}}>{h}</th>)}</tr></thead>
+            <tbody>{orders.slice(0,6).map(o=>(
+              <tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>
+                <td style={{padding:"9px 10px",fontWeight:700,color:"#cc0000",fontSize:12}}>{o.id}</td>
+                <td style={{padding:"9px 10px"}}>{o.customer}</td>
+                <td style={{padding:"9px 10px",color:"#777"}}>{o.product}</td>
+                <td style={{padding:"9px 10px"}}>{o.qty}</td>
+                <td style={{padding:"9px 10px",fontWeight:600}}>{fmtM(o.total)}</td>
+                <td style={{padding:"9px 10px"}}><StatusBadge s={o.status}/></td>
+              </tr>
+            ))}</tbody>
+          </table>
+        </div>
+      </div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12}}>
+        {[["ti-qrcode","Scan & Receive","receive","#cc0000",["Admin","Office Staff"]],["ti-truck-delivery","Deliver & Pay","deliver","#1d9e75",["Admin","Office Staff"]],["ti-plus-circle","New Order","new-order","#185fa5",["Admin","Office Staff"]],["ti-report","Reports","reports","#854f0b",["Admin","Accountant"]]].filter(([,,,,roles])=>roles.includes(user.role)).map(([ic,lb,pg,cl])=>(
+          <button key={pg} onClick={()=>goto(pg)} style={{background:"#fff",border:`1.5px solid ${cl}22`,borderRadius:14,padding:"16px",cursor:"pointer",textAlign:"center",transition:"all .15s"}}
+            onMouseEnter={e=>e.currentTarget.style.background=cl+"0a"}
+            onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+            <i className={`ti ${ic}`} style={{fontSize:26,color:cl,display:"block",marginBottom:8}}/>
+            <div style={{fontSize:13,fontWeight:600,color:"#333"}}>{lb}</div>
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── NEW ORDER ──
+const NEW_ORDER_DEF={customer:"",mobile:"",address:"",product:PRODUCTS[0],wood:WOODS[0],size:"",qty:"",advance:"",pending:"",total:"",delivery:"",notes:""};
+const NEW_ORDER_LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBottom:4};
+function NewOrder({user,onAdd,toast2}){
+  const [f,setF]=useState(NEW_ORDER_DEF);
+  const [done,setDone]=useState(null);
+  const upd=(k,v)=>setF(p=>{const n={...p,[k]:v};if(k==="advance"||k==="total")n.pending=Math.max(0,Number(n.total||0)-Number(n.advance||0)).toString();return n;});
+  const sub=e=>{
+    e.preventDefault();
+    if(!f.customer||!f.mobile||!f.size||!f.qty){toast2("Fill all required fields","err");return;}
+    const o={...f,id:genId(),status:S.PROD,created:now2(),createdBy:user.name,qty:Number(f.qty),advance:Number(f.advance)||0,pending:Number(f.pending)||0,total:Number(f.total)||0,payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:""};
+    onAdd(o);setDone(o);
+  };
+  if(done) return(
+    <div style={{maxWidth:480,margin:"0 auto"}}>
+      <div className="card" style={{textAlign:"center"}}>
+        <div style={{width:52,height:52,background:"#e1f5ee",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px"}}>
+          <i className="ti ti-check" style={{fontSize:26,color:"#1d9e75"}}/>
+        </div>
+        <div style={{fontSize:17,fontWeight:700,marginBottom:4}}>Order Created!</div>
+        <div style={{fontSize:13,color:"#999",marginBottom:18}}>{done.id}</div>
+        <div style={{background:"#fafaf8",borderRadius:12,padding:14,display:"inline-block",marginBottom:18}}>
+          <QRSvg order={done}/>
+        </div>
+        <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+          <button className="btn btn-red" onClick={()=>printQR(done)}><i className="ti ti-printer"/>Print QR</button>
+          <button className="btn btn-green" onClick={()=>downloadQR(done)}><i className="ti ti-download"/>Download QR</button>
+          <button className="btn btn-outline" onClick={()=>{setDone(null);setF(NEW_ORDER_DEF);}}><i className="ti ti-plus"/>New Order</button>
+        </div>
+      </div>
+    </div>
+  );
+  const lbl=NEW_ORDER_LBL;
+  return(
+    <div style={{maxWidth:660,margin:"0 auto"}}>
+      <div className="card">
+        <div style={{fontWeight:700,fontSize:15,marginBottom:18}}>Create New Order</div>
+        <form onSubmit={sub}>
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:13}}>
+            <div><label style={lbl}>Customer Name *</label><input className="inp" value={f.customer} onChange={e=>upd("customer",e.target.value)} placeholder="Full name"/></div>
+            <div><label style={lbl}>Mobile Number *</label><input className="inp" value={f.mobile} onChange={e=>upd("mobile",e.target.value)} placeholder="10-digit mobile"/></div>
+            <div><label style={lbl}>Address (optional)</label><input className="inp" value={f.address} onChange={e=>upd("address",e.target.value)} placeholder="Optional"/></div>
+            <div><label style={lbl}>Product Type *</label>
+              <select className="inp" value={f.product} onChange={e=>upd("product",e.target.value)}>{PRODUCTS.map(p=><option key={p}>{p}</option>)}</select></div>
+            <div><label style={lbl}>Wood Type *</label>
+              <select className="inp" value={f.wood} onChange={e=>upd("wood",e.target.value)}>{WOODS.map(w=><option key={w}>{w}</option>)}</select></div>
+            <div><label style={lbl}>Size / Dimensions *</label><input className="inp" value={f.size} onChange={e=>upd("size",e.target.value)} placeholder='e.g. 2"x4"x10ft'/></div>
+            <div><label style={lbl}>Quantity *</label><input type="number" className="inp" value={f.qty} onChange={e=>upd("qty",e.target.value)} placeholder="Units"/></div>
+            <div><label style={lbl}>Total Amount (₹)</label><input type="number" className="inp" value={f.total} onChange={e=>upd("total",e.target.value)} placeholder="0"/></div>
+            <div><label style={lbl}>Advance Paid (₹)</label><input type="number" className="inp" value={f.advance} onChange={e=>upd("advance",e.target.value)} placeholder="0"/></div>
+            <div><label style={lbl}>Pending Amount (₹)</label><input type="number" className="inp" value={f.pending} onChange={e=>upd("pending",e.target.value)} placeholder="Auto-calculated"/></div>
+            <div><label style={lbl}>Delivery Date</label><input type="date" className="inp" value={f.delivery} onChange={e=>upd("delivery",e.target.value)}/></div>
+            <div style={{gridColumn:"span 2"}}>
+              <label style={lbl}>Notes / Special Instructions</label>
+              <textarea className="inp" rows={2} value={f.notes} onChange={e=>upd("notes",e.target.value)} placeholder="Special instructions..."/>
+            </div>
+          </div>
+          <button type="submit" className="btn btn-red" style={{marginTop:18}}><i className="ti ti-check"/>Create Order & Generate QR</button>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// ── ORDER LIST ──
+function OrderList({orders,updOrder,toast2,user}){
+  const [q,setQ]=useState("");
+  const [fl,setFl]=useState("all");
+  const [sel,setSel]=useState(null);
+  const filtered=orders.filter(o=>{
+    const m=!q||o.customer.toLowerCase().includes(q.toLowerCase())||o.mobile.includes(q)||o.id.toLowerCase().includes(q.toLowerCase());
+    const s=fl==="all"||o.status===fl;
+    return m&&s;
+  });
+  if(sel) return(
+    <div style={{maxWidth:560,margin:"0 auto"}}>
+      <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setSel(null)}>← Back</button>
+      <div className="card">
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:8}}>
+          <div><div style={{fontSize:12,fontWeight:700,color:"#cc0000"}}>{sel.id}</div><div style={{fontSize:17,fontWeight:700}}>{sel.customer}</div><div style={{fontSize:13,color:"#999"}}>{sel.mobile}</div></div>
+          <StatusBadge s={sel.status}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,fontSize:13,marginBottom:18}}>
+          {[["Product",sel.product],["Wood",sel.wood],["Size",sel.size],["Quantity",sel.qty],
+            ...( ["Admin","Accountant"].includes(user.role)?[["Total",fmtM(sel.total)],["Advance",fmtM(sel.advance)],["Pending",fmtM(sel.pending)]]:[] ),
+            ["Delivery",fmtD(sel.delivery)]].map(([k,v])=>(
+            <div key={k}><div style={{fontSize:10.5,color:"#bbb",marginBottom:2}}>{k}</div><div style={{fontWeight:600}}>{v}</div></div>
+          ))}
+          {sel.notes&&<div style={{gridColumn:"span 2"}}><div style={{fontSize:10.5,color:"#bbb",marginBottom:2}}>Notes</div><div style={{color:"#555",fontSize:12}}>{sel.notes}</div></div>}
+        </div>
+        <div style={{display:"flex",justifyContent:"center",marginBottom:14}}>
+          <QRSvg order={sel}/>
+        </div>
+        <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+          <button className="btn btn-red" onClick={()=>printQR(sel)}><i className="ti ti-printer"/>Print QR</button>
+          <button className="btn btn-green" onClick={()=>downloadQR(sel)}><i className="ti ti-download"/>Download QR</button>
+          {sel.status===S.DELI&&<button className="btn btn-outline" onClick={()=>printInvoice(sel)}><i className="ti ti-file-invoice"/>Invoice</button>}
+        </div>
+      </div>
+    </div>
+  );
+  return(
+    <div>
+      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
+        <div style={{flex:1,minWidth:180,position:"relative"}}>
+          <i className="ti ti-search" style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",color:"#bbb",fontSize:14}}/>
+          <input className="inp" style={{paddingLeft:34}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search name, mobile, order ID..."/>
+        </div>
+        <select className="inp" style={{width:"auto",minWidth:160}} value={fl} onChange={e=>setFl(e.target.value)}>
+          <option value="all">All Status</option>
+          <option value={S.PROD}>In Production</option>
+          <option value={S.RECV}>Received at Office</option>
+          <option value={S.DELI}>Delivered & Paid</option>
+        </select>
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:9}}>
+        {filtered.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No orders found</div>}
+        {filtered.map(o=>(
+          <div key={o.id} onClick={()=>setSel(o)} className="card" style={{display:"flex",alignItems:"center",gap:14,cursor:"pointer",padding:"13px 16px",flexWrap:"wrap",transition:"border .15s",border:"1px solid #eeebe6"}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor="#cc000033"}
+            onMouseLeave={e=>e.currentTarget.style.borderColor="#eeebe6"}>
+            <div style={{flex:1,minWidth:130}}>
+              <div style={{fontWeight:700,fontSize:12,color:"#cc0000"}}>{o.id}</div>
+              <div style={{fontWeight:600,fontSize:14}}>{o.customer}</div>
+              <div style={{fontSize:12,color:"#999"}}>{o.mobile}</div>
+            </div>
+            <div style={{flex:1,minWidth:110}}>
+              <div style={{fontSize:13,color:"#666"}}>{o.product} · {o.wood}</div>
+              <div style={{fontSize:12,color:"#bbb"}}>{o.size} · Qty: {o.qty}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              {["Admin","Accountant"].includes(user.role)&&<div style={{fontWeight:700,fontSize:14}}>{fmtM(o.total)}</div>}
+              {["Admin","Accountant"].includes(user.role)&&o.pending>0&&<div style={{fontSize:11,color:"#cc0000"}}>Pending: {fmtM(o.pending)}</div>}
+            </div>
+            <StatusBadge s={o.status}/>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── FACTORY ──
+function Factory({orders}){
+  const active=orders.filter(o=>o.status===S.PROD);
+  const [sel,setSel]=useState(null);
+  if(sel) return(
+    <div style={{maxWidth:440,margin:"0 auto"}}>
+      <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setSel(null)}>← Back</button>
+      <div className="card" style={{textAlign:"center"}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#cc0000",marginBottom:4}}>{sel.id}</div>
+        <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>{sel.customer}</div>
+        <div style={{fontSize:13,color:"#999",marginBottom:16}}>{sel.mobile}</div>
+        <div style={{background:"#fafaf8",borderRadius:12,padding:14,display:"inline-block",marginBottom:14}}>
+          <QRSvg order={sel}/>
+        </div>
+        <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12.5,marginBottom:18,textAlign:"left"}}>
+          {[["Product",sel.product],["Wood",sel.wood],["Size",sel.size],["Qty",sel.qty],["Delivery",fmtD(sel.delivery)]].map(([k,v])=>(
+            <div key={k} style={{background:"#fafaf8",borderRadius:9,padding:"9px 11px"}}><div style={{fontSize:10,color:"#bbb"}}>{k}</div><div style={{fontWeight:600}}>{v}</div></div>
+          ))}
+          {sel.notes&&<div style={{gridColumn:"span 2",background:"#fff8f8",borderRadius:9,padding:"9px 11px",border:"1px solid #ffe0e0"}}><div style={{fontSize:10,color:"#cc0000",marginBottom:2}}>Notes</div><div style={{fontSize:12}}>{sel.notes}</div></div>}
+        </div>
+        <button className="btn btn-red" onClick={()=>printQR(sel)}><i className="ti ti-printer"/>Print QR Sticker</button>
+      </div>
+    </div>
+  );
+  return(
+    <div>
+      <div style={{fontSize:13,color:"#999",marginBottom:14}}>{active.length} orders in production</div>
+      <div style={{display:"flex",flexDirection:"column",gap:9}}>
+        {active.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No orders in production</div>}
+        {active.map(o=>(
+          <div key={o.id} onClick={()=>setSel(o)} className="card" style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer",padding:"13px 16px",flexWrap:"wrap",transition:"border .15s",border:"1px solid #eeebe6"}}
+            onMouseEnter={e=>e.currentTarget.style.borderColor="#cc000033"}
+            onMouseLeave={e=>e.currentTarget.style.borderColor="#eeebe6"}>
+            <div style={{width:38,height:38,background:"#fff3f3",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <i className="ti ti-tool" style={{color:"#cc0000",fontSize:19}}/>
+            </div>
+            <div style={{flex:1}}>
+              <div style={{fontWeight:700,color:"#cc0000",fontSize:12}}>{o.id}</div>
+              <div style={{fontWeight:600,fontSize:14}}>{o.customer}</div>
+              <div style={{fontSize:12,color:"#999"}}>{o.product} · {o.wood} · {o.size} · Qty {o.qty}</div>
+            </div>
+            <div style={{textAlign:"right"}}>
+              <div style={{fontSize:11,color:"#bbb"}}>Delivery</div>
+              <div style={{fontWeight:600,fontSize:13}}>{fmtD(o.delivery)}</div>
+            </div>
+            <i className="ti ti-qrcode" style={{fontSize:22,color:"#e0ddd8"}}/>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── RECEIVE ──
+function Receive({orders,updOrder,user,toast2}){
+  const [found,setFound]=useState(null);
+  const [mid,setMid]=useState("");
+  const [scanning,setScanning]=useState(false);
+  const vidRef=useRef(null);
+  const stRef=useRef(null);
+  const ivRef=useRef(null);
+
+  const stopCam=useCallback(()=>{
+    if(ivRef.current) clearInterval(ivRef.current);
+    if(stRef.current) stRef.current.getTracks().forEach(t=>t.stop());
+    stRef.current=null;setScanning(false);
+  },[]);
+
+  const startCam=async()=>{
+    try{
+      const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+      stRef.current=st;
+      if(vidRef.current) vidRef.current.srcObject=st;
+      setScanning(true);
+      ivRef.current=setInterval(()=>{
+        if(!vidRef.current||!window.jsQR) return;
+        const cv=document.createElement("canvas");cv.width=vidRef.current.videoWidth;cv.height=vidRef.current.videoHeight;
+        const ctx=cv.getContext("2d");ctx.drawImage(vidRef.current,0,0);
+        const img=ctx.getImageData(0,0,cv.width,cv.height);
+        const code=window.jsQR(img.data,img.width,img.height);
+        if(code){const o=orders.find(x=>code.data.includes(x.id));if(o){stopCam();setFound(o);}}
+      },300);
+    }catch(e){toast2("Camera access denied","err");}
+  };
+
+  const search=()=>{
+    const o=orders.find(x=>x.id.toLowerCase()===mid.toLowerCase().trim()||x.mobile===mid.trim());
+    o?setFound(o):toast2("Order not found","err");
+  };
+
+  const markRecv=()=>{
+    if(found.status!==S.PROD){toast2("Already received","err");return;}
+    updOrder(found.id,{status:S.RECV,receivedAt:now2(),receivedBy:user.name});
+    toast2("Marked as Received at Office!");setFound(null);setMid("");
+  };
+
+  useEffect(()=>()=>stopCam(),[stopCam]);
+
+  return(
+    <div style={{maxWidth:500,margin:"0 auto"}}>
+      <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"/>
+      {!found&&(
+        <div className="card">
+          <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>Scan QR Code to Receive</div>
+          <div style={{background:"#1a1a1a",borderRadius:13,overflow:"hidden",marginBottom:12,position:"relative",minHeight:210}}>
+            <video ref={vidRef} autoPlay playsInline muted style={{width:"100%",display:"block",maxHeight:270,objectFit:"cover"}}/>
+            {!scanning&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:8}}>
+              <i className="ti ti-qrcode" style={{fontSize:44,color:"#444"}}/>
+              <div style={{color:"#666",fontSize:13}}>Camera not active</div>
+            </div>}
+            {scanning&&<div style={{position:"absolute",inset:0,border:"3px solid #cc0000",borderRadius:13,pointerEvents:"none"}}/>}
+          </div>
+          <div style={{marginBottom:16}}>
+            {!scanning
+              ?<button className="btn btn-red" style={{width:"100%",justifyContent:"center"}} onClick={startCam}><i className="ti ti-camera"/>Start Camera Scan</button>
+              :<button className="btn btn-outline" style={{width:"100%",justifyContent:"center"}} onClick={stopCam}><i className="ti ti-player-stop"/>Stop Camera</button>}
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <input className="inp" value={mid} onChange={e=>setMid(e.target.value)} placeholder="Order ID or Mobile Number" onKeyDown={e=>e.key==="Enter"&&search()}/>
+            <button className="btn btn-red" onClick={search}><i className="ti ti-search"/></button>
+          </div>
+        </div>
+      )}
+      {found&&(
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontWeight:700,fontSize:16}}>Order Found</div>
+            <button onClick={()=>setFound(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
+          </div>
+          <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:14}}>
+            <div style={{fontWeight:700,color:"#cc0000",fontSize:12,marginBottom:4}}>{found.id}</div>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>{found.customer}</div>
+            <div style={{fontSize:13,color:"#999",marginBottom:12}}>{found.mobile}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12.5}}>
+              {[["Product",found.product],["Wood",found.wood],["Size",found.size],["Qty",found.qty],["Total",fmtM(found.total)],["Pending",fmtM(found.pending)]].map(([k,v])=>(
+                <div key={k}><span style={{color:"#bbb"}}>{k}: </span><b>{v}</b></div>
+              ))}
+            </div>
+          </div>
+          <div style={{marginBottom:14}}><StatusBadge s={found.status}/></div>
+          {found.status===S.PROD
+            ?<button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:15}} onClick={markRecv}><i className="ti ti-check"/>Mark as Received at Office</button>
+            :<div style={{padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:600,fontSize:13,textAlign:"center"}}>✓ Already Received – {found.receivedAt}</div>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── DELIVER ──
+function Deliver({orders,updOrder,user,toast2}){
+  const [found,setFound]=useState(null);
+  const [mid,setMid]=useState("");
+  const [pm,setPm]=useState("Cash");
+  const [pt,setPt]=useState("full");
+  const [partial,setPartial]=useState("");
+  const [scanning,setScanning]=useState(false);
+  const vidRef=useRef(null);
+  const stRef=useRef(null);
+  const ivRef=useRef(null);
+
+  const stopCam=useCallback(()=>{
+    if(ivRef.current) clearInterval(ivRef.current);
+    if(stRef.current) stRef.current.getTracks().forEach(t=>t.stop());
+    stRef.current=null;setScanning(false);
+  },[]);
+
+  const startCam=async()=>{
+    try{
+      const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+      stRef.current=st;
+      if(vidRef.current) vidRef.current.srcObject=st;
+      setScanning(true);
+      ivRef.current=setInterval(()=>{
+        if(!vidRef.current||!window.jsQR) return;
+        const cv=document.createElement("canvas");cv.width=vidRef.current.videoWidth;cv.height=vidRef.current.videoHeight;
+        const ctx=cv.getContext("2d");ctx.drawImage(vidRef.current,0,0);
+        const img=ctx.getImageData(0,0,cv.width,cv.height);
+        const code=window.jsQR(img.data,img.width,img.height);
+        if(code){const o=orders.find(x=>code.data.includes(x.id));if(o){stopCam();setFound(o);}}
+      },300);
+    }catch(e){toast2("Camera denied","err");}
+  };
+
+  const search=()=>{
+    const o=orders.find(x=>x.id.toLowerCase()===mid.toLowerCase().trim()||x.mobile===mid.trim());
+    o?setFound(o):toast2("Order not found","err");
+  };
+
+  const markDel=()=>{
+    if(found.status===S.PROD){toast2("Not yet received at office","err");return;}
+    const pendFinal=pt==="full"?0:pt==="partial"?Math.max(0,found.pending-Number(partial)):found.pending;
+    updOrder(found.id,{status:S.DELI,pending:pendFinal,payMethod:pm,payAt:now2(),deliveredAt:now2(),deliveredBy:user.name});
+    toast2("Delivered & Paid!");
+    const updated={...found,status:S.DELI,pending:pendFinal,payMethod:pm,deliveredAt:now2()};
+    setTimeout(()=>printInvoice(updated),400);
+    setFound(null);setMid("");setPt("full");setPartial("");
+  };
+
+  useEffect(()=>()=>stopCam(),[stopCam]);
+
+  return(
+    <div style={{maxWidth:500,margin:"0 auto"}}>
+      <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"/>
+      {!found&&(
+        <div className="card">
+          <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>Scan to Deliver & Collect Payment</div>
+          <div style={{background:"#1a1a1a",borderRadius:13,overflow:"hidden",marginBottom:12,position:"relative",minHeight:200}}>
+            <video ref={vidRef} autoPlay playsInline muted style={{width:"100%",display:"block",maxHeight:250,objectFit:"cover"}}/>
+            {!scanning&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:8}}>
+              <i className="ti ti-qrcode" style={{fontSize:44,color:"#444"}}/>
+              <div style={{color:"#666",fontSize:13}}>Camera not active</div>
+            </div>}
+          </div>
+          <div style={{marginBottom:14}}>
+            {!scanning
+              ?<button className="btn btn-red" style={{width:"100%",justifyContent:"center"}} onClick={startCam}><i className="ti ti-camera"/>Start Camera</button>
+              :<button className="btn btn-outline" style={{width:"100%",justifyContent:"center"}} onClick={stopCam}><i className="ti ti-player-stop"/>Stop</button>}
+          </div>
+          <div style={{display:"flex",gap:8}}>
+            <input className="inp" value={mid} onChange={e=>setMid(e.target.value)} placeholder="Order ID or Mobile" onKeyDown={e=>e.key==="Enter"&&search()}/>
+            <button className="btn btn-red" onClick={search}><i className="ti ti-search"/></button>
+          </div>
+        </div>
+      )}
+      {found&&(
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
+            <div style={{fontWeight:700,fontSize:16}}>Payment & Delivery</div>
+            <button onClick={()=>setFound(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
+          </div>
+          <div style={{background:"#fafaf8",borderRadius:12,padding:13,marginBottom:13}}>
+            <div style={{fontWeight:700,color:"#cc0000",fontSize:12,marginBottom:3}}>{found.id}</div>
+            <div style={{fontWeight:700,fontSize:14}}>{found.customer} · {found.mobile}</div>
+            <div style={{fontSize:12,color:"#777",marginTop:2}}>{found.product} · {found.wood} · {found.size} · Qty {found.qty}</div>
+          </div>
+          <div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:12,padding:13,marginBottom:13}}>
+            <div style={{fontSize:12,fontWeight:700,color:"#cc0000",marginBottom:8}}>Payment Summary</div>
+            {[["Total Amount",fmtM(found.total)],["Advance Paid",fmtM(found.advance)],["Pending Amount",fmtM(found.pending)]].map(([k,v])=>(
+              <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:13,padding:"4px 0",borderBottom:"1px solid #ffe0e0"}}>
+                <span style={{color:"#aaa"}}>{k}</span><b style={{color:k==="Pending Amount"?"#cc0000":"#1a1a1a"}}>{v}</b>
+              </div>
+            ))}
+          </div>
+          <div style={{marginBottom:12}}>
+            <div style={{fontSize:11.5,fontWeight:600,color:"#777",marginBottom:7}}>Payment Status</div>
+            <div style={{display:"flex",gap:8}}>
+              {[["full","Paid"],["partial","Partial"],["pending","Pending"]].map(([k,l])=>(
+                <button key={k} className="btn" onClick={()=>setPt(k)} style={{flex:1,justifyContent:"center",background:pt===k?"#cc0000":"#fff",color:pt===k?"#fff":"#555",border:`1.5px solid ${pt===k?"#cc0000":"#ddd"}`}}>{l}</button>
+              ))}
+            </div>
+          </div>
+          {pt==="partial"&&(
+            <div style={{marginBottom:12}}>
+              <label style={{fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBottom:4}}>Amount Collected (₹)</label>
+              <input type="number" className="inp" value={partial} onChange={e=>setPartial(e.target.value)} placeholder="Enter amount received"/>
+            </div>
+          )}
+          <div style={{marginBottom:16}}>
+            <div style={{fontSize:11.5,fontWeight:600,color:"#777",marginBottom:7}}>Payment Method</div>
+            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+              {PAY_M.map(m=>(
+                <button key={m} className="btn" onClick={()=>setPm(m)} style={{background:pm===m?"#1a1a1a":"#fff",color:pm===m?"#fff":"#555",border:`1.5px solid ${pm===m?"#1a1a1a":"#ddd"}`}}>{m}</button>
+              ))}
+            </div>
+          </div>
+          {found.status===S.DELI
+            ?<div style={{padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:600,textAlign:"center",fontSize:13}}>✓ Already Delivered & Paid</div>
+            :<button className="btn btn-red" style={{width:"100%",justifyContent:"center",fontSize:15}} onClick={markDel}><i className="ti ti-truck-delivery"/>Mark Delivered & Print Invoice</button>}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── REPORTS ──
+function Reports({orders}){
+  const [tab,setTab]=useState("daily");
+  const deli=orders.filter(o=>o.status===S.DELI);
+  const pend=orders.filter(o=>o.status!==S.DELI&&o.pending>0);
+  const tabs=[["daily","Daily Sales"],["pending","Pending Payments"],["delivered","Delivered"],["customers","Customer History"]];
+  const TRow=({o,cols})=>{
+    const fv=(k,v)=>{
+      if(["total","advance","pending"].includes(k)) return fmtM(v);
+      if(k==="status") return <StatusBadge s={v}/>;
+      return v||"—";
+    };
+    return<tr style={{borderBottom:"1px solid #fafaf8"}}>{cols.map(c=><td key={c} style={{padding:"9px 10px",fontSize:12.5,color:c==="id"?"#cc0000":c==="pending"&&o.pending>0?"#cc0000":"#333",fontWeight:c==="id"?"700":"400"}}>{fv(c,o[c])}</td>)}</tr>;
+  };
+  const labels={id:"Order ID",customer:"Customer",mobile:"Mobile",product:"Product",wood:"Wood",qty:"Qty",total:"Total",advance:"Advance",pending:"Pending",status:"Status",payMethod:"Payment",deliveredAt:"Delivered",deliveredBy:"By"};
+  const Table=({rows,cols})=>rows.length===0
+    ?<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No records</div>
+    :<div style={{background:"#fff",borderRadius:14,border:"1px solid #eeebe6",overflow:"hidden"}}><div style={{overflowX:"auto"}}>
+      <table style={{width:"100%",borderCollapse:"collapse"}}>
+        <thead><tr style={{background:"#fafaf8"}}>{cols.map(c=><th key={c} style={{padding:"9px 10px",textAlign:"left",fontWeight:600,color:"#bbb",fontSize:11,borderBottom:"1px solid #eeebe6"}}>{labels[c]||c}</th>)}</tr></thead>
+        <tbody>{rows.map(o=><TRow key={o.id} o={o} cols={cols}/>)}</tbody>
+      </table></div></div>;
+  return(
+    <div>
+      <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
+        {tabs.map(([k,l])=>(
+          <button key={k} className="btn" onClick={()=>setTab(k)} style={{background:tab===k?"#cc0000":"#fff",color:tab===k?"#fff":"#555",border:`1.5px solid ${tab===k?"#cc0000":"#ddd"}`}}>{l}</button>
+        ))}
+      </div>
+      {tab==="daily"&&(
+        <div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:18}}>
+            {[["Total Revenue",fmtM(deli.reduce((a,o)=>a+o.total,0)),"#1d9e75"],["Orders Delivered",deli.length,"#185fa5"],["Avg Order",fmtM(deli.length?Math.round(deli.reduce((a,o)=>a+o.total,0)/deli.length):0),"#854f0b"]].map(([l,v,c])=>(
+              <div key={l} className="card" style={{padding:"14px 16px"}}><div style={{fontSize:10.5,color:"#bbb",marginBottom:5}}>{l}</div><div style={{fontSize:22,fontWeight:700,color:c}}>{v}</div></div>
+            ))}
+          </div>
+          <Table rows={deli} cols={["id","customer","product","qty","total","payMethod","deliveredAt"]}/>
+        </div>
+      )}
+      {tab==="pending"&&(
+        <div>
+          <div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:12,padding:"11px 16px",marginBottom:14,fontWeight:700,color:"#cc0000",fontSize:14}}>
+            Total Pending: {fmtM(pend.reduce((a,o)=>a+o.pending,0))}
+          </div>
+          <Table rows={pend} cols={["id","customer","mobile","total","advance","pending","status"]}/>
+        </div>
+      )}
+      {tab==="delivered"&&<Table rows={deli} cols={["id","customer","product","wood","qty","total","deliveredAt","deliveredBy"]}/>}
+      {tab==="customers"&&(
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          {[...new Set(orders.map(o=>o.mobile))].map(mob=>{
+            const co=orders.filter(o=>o.mobile===mob);const c=co[0];
+            return(
+              <div key={mob} className="card" style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,padding:"13px 16px"}}>
+                <div><div style={{fontWeight:700,fontSize:14}}>{c.customer}</div><div style={{fontSize:12,color:"#999"}}>{c.mobile}</div></div>
+                <div style={{textAlign:"right"}}><div style={{fontWeight:700}}>{co.length} orders</div><div style={{fontSize:12,color:"#1d9e75",fontWeight:600}}>{fmtM(co.reduce((a,o)=>a+o.total,0))} total</div></div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
+</script>
+</body>
+</html>
