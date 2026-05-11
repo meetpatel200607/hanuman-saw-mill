@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
 <meta charset="UTF-8"/>
-<meta name="viewport" content="width=device-width,initial-scale=1"/>
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 <title>Hanuman Saw Mill</title>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
@@ -73,7 +73,7 @@ const USERS=[
   {id:3,name:"Suresh Factory",username:"factory",password:"arvind2026",role:"Factory Staff"},
   {id:4,name:"Accounts User",username:"accounts",password:"acc123",role:"Accountant"},
 ];
-const WOODS=["Teak","Sal","Pine","Eucalyptus","Mango","Neem","Sagwan","Deodar","Rosewood","Bamboo","Khair"];
+const WOODS=["Khair","Sisam","Pine","Teak","Saghwan","Deodar"];
 const PRODUCTS=["Umbra Patti","Door Frame","Window Frame","Plank","Batten","Rafter","Purlin","Custom"];
 const PAY_M=["Cash","UPI","Bank Transfer"];
 const S={PROD:"In Production",RECV:"Received at Office",DELI:"Delivered & Paid"};
@@ -425,7 +425,7 @@ function App(){
           {page==="factory"&&<Factory orders={orders}/>}
           {page==="receive"&&<Receive orders={orders} updOrder={updOrder} user={user} toast2={toast2}/>}
           {page==="deliver"&&<Deliver orders={orders} updOrder={updOrder} user={user} toast2={toast2}/>}
-          {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={orders}/>}
+          {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={orders} user={user}/>}
         </main>
       </div>
 
@@ -506,21 +506,21 @@ function Dashboard({orders,goto,user}){
 }
 
 // ── NEW ORDER ──
-const NEW_ORDER_DEF={customer:"",mobile:"",address:"",product:PRODUCTS[0],wood:WOODS[0],dimL:"",dimW:"",dimT:"",size:"",qty:"",advance:"",pending:"",total:"",delivery:"",notes:""};
+const NEW_ORDER_DEF={customer:"",mobile:"",product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",size:"",qty:"",advance:"",pending:"",total:"",delivery:"",notes:""};
 const NEW_ORDER_LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBottom:4};
 function NewOrder({user,onAdd,toast2}){
   const [f,setF]=useState(NEW_ORDER_DEF);
   const [done,setDone]=useState(null);
   // Refs for Enter-key navigation (in tab order)
   const r={
-    customer:useRef(null),mobile:useRef(null),address:useRef(null),
+    customer:useRef(null),mobile:useRef(null),
     product:useRef(null),wood:useRef(null),
     dimL:useRef(null),dimW:useRef(null),dimT:useRef(null),
     qty:useRef(null),total:useRef(null),advance:useRef(null),
     delivery:useRef(null),notes:useRef(null),submit:useRef(null)
   };
   // Ordered sequence for Enter navigation
-  const TAB_ORDER=["customer","mobile","address","product","wood","dimL","dimW","dimT","qty","total","advance","delivery","notes","submit"];
+  const TAB_ORDER=["customer","mobile","product","wood","dimL","dimW","dimT","qty","total","advance","delivery","notes","submit"];
   const focusNext=(current)=>{
     const idx=TAB_ORDER.indexOf(current);
     if(idx===-1) return;
@@ -567,7 +567,6 @@ function NewOrder({user,onAdd,toast2}){
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:13}}>
             <div><label style={lbl}>Customer Name *</label><input ref={r.customer} className="inp" value={f.customer} onChange={e=>upd("customer",e.target.value)} onKeyDown={onKey("customer")} placeholder="Full name"/></div>
             <div><label style={lbl}>Mobile Number *</label><div style={{display:"flex",gap:8}}><input ref={r.mobile} className="inp" value={f.mobile} onChange={e=>upd("mobile",e.target.value)} onKeyDown={onKey("mobile")} placeholder="10-digit mobile" style={{flex:1}}/>{f.mobile&&f.mobile.length>=10&&<a href={"tel:"+f.mobile} className="btn btn-green" style={{padding:"10px 14px",textDecoration:"none",whiteSpace:"nowrap"}}><i className="ti ti-phone"/>Call</a>}</div></div>
-            <div><label style={lbl}>Address (optional)</label><input ref={r.address} className="inp" value={f.address} onChange={e=>upd("address",e.target.value)} onKeyDown={onKey("address")} placeholder="Optional"/></div>
             <div><label style={lbl}>Product Type *</label>
               <select ref={r.product} className="inp" value={f.product} onChange={e=>upd("product",e.target.value)} onKeyDown={onKey("product")}>{PRODUCTS.map(p=><option key={p}>{p}</option>)}</select></div>
             <div><label style={lbl}>Wood Type *</label>
@@ -944,11 +943,13 @@ function Deliver({orders,updOrder,user,toast2}){
 }
 
 // ── REPORTS ──
-function Reports({orders}){
+function Reports({orders,user}){
   const [tab,setTab]=useState("daily");
+  const [selMonth,setSelMonth]=useState(()=>{const d=new Date();return d.getFullYear()+"-"+(String(d.getMonth()+1).padStart(2,"0"));});
   const deli=orders.filter(o=>o.status===S.DELI);
   const pend=orders.filter(o=>o.status!==S.DELI&&o.pending>0);
-  const tabs=[["daily","Daily Sales"],["pending","Pending Payments"],["delivered","Delivered"],["customers","Customer History"]];
+  const isAdmin=user&&user.role==="Admin";
+  const tabs=[["daily","Daily Sales"],["pending","Pending Payments"],["delivered","Delivered"],["customers","Customer History"],...(isAdmin?[["monthly","Monthly Report"]]:[])];
   const TRow=({o,cols})=>{
     const fv=(k,v)=>{
       if(["total","advance","pending"].includes(k)) return fmtM(v);
@@ -965,6 +966,40 @@ function Reports({orders}){
         <thead><tr style={{background:"#fafaf8"}}>{cols.map(c=><th key={c} style={{padding:"9px 10px",textAlign:"left",fontWeight:600,color:"#bbb",fontSize:11,borderBottom:"1px solid #eeebe6"}}>{labels[c]||c}</th>)}</tr></thead>
         <tbody>{rows.map(o=><TRow key={o.id} o={o} cols={cols}/>)}</tbody>
       </table></div></div>;
+
+  // Monthly report helpers
+  const allMonths=[...new Set(orders.map(o=>{
+    const d=o.deliveredAt||o.created;
+    if(!d) return null;
+    // try parse Indian locale date
+    let dt=new Date(d);
+    if(isNaN(dt)){const p=d.split(/[/,\s]+/);if(p.length>=3)dt=new Date(p[2],p[1]-1,p[0]);}
+    if(isNaN(dt)) return null;
+    return dt.getFullYear()+"-"+(String(dt.getMonth()+1).padStart(2,"0"));
+  }).filter(Boolean))].sort().reverse();
+
+  const parseOrderDate=(o)=>{
+    const d=o.deliveredAt||o.created;
+    if(!d) return null;
+    let dt=new Date(d);
+    if(isNaN(dt)){const p=d.split(/[/,\s]+/);if(p.length>=3)dt=new Date(p[2],p[1]-1,p[0]);}
+    return isNaN(dt)?null:dt;
+  };
+
+  const monthOrders=orders.filter(o=>{
+    const dt=parseOrderDate(o);
+    if(!dt) return false;
+    const m=dt.getFullYear()+"-"+(String(dt.getMonth()+1).padStart(2,"0"));
+    return m===selMonth;
+  });
+  const monthDeli=monthOrders.filter(o=>o.status===S.DELI);
+  const monthPend=monthOrders.filter(o=>o.status!==S.DELI&&o.pending>0);
+  const monthRev=monthDeli.reduce((a,o)=>a+Number(o.total||0),0);
+  const monthAdv=monthOrders.reduce((a,o)=>a+Number(o.advance||0),0);
+  const monthDue=monthOrders.filter(o=>o.status!==S.DELI).reduce((a,o)=>a+Number(o.pending||0),0);
+  const woodBreakdown=[...monthOrders.reduce((m,o)=>{const k=o.wood||"Unknown";m.set(k,(m.get(k)||0)+Number(o.qty||0));return m;},new Map())].sort((a,b)=>b[1]-a[1]);
+  const productBreakdown=[...monthOrders.reduce((m,o)=>{const k=o.product||"Unknown";m.set(k,(m.get(k)||0)+1);return m;},new Map())].sort((a,b)=>b[1]-a[1]);
+
   return(
     <div>
       <div style={{display:"flex",gap:8,marginBottom:18,flexWrap:"wrap"}}>
@@ -1002,6 +1037,75 @@ function Reports({orders}){
               </div>
             );
           })}
+        </div>
+      )}
+      {tab==="monthly"&&isAdmin&&(
+        <div>
+          <div style={{display:"flex",alignItems:"center",gap:12,marginBottom:18,flexWrap:"wrap"}}>
+            <div style={{fontWeight:700,fontSize:15}}>Monthly Report</div>
+            <select className="inp" style={{width:"auto",minWidth:160}} value={selMonth} onChange={e=>setSelMonth(e.target.value)}>
+              {allMonths.length===0&&<option value={selMonth}>{selMonth}</option>}
+              {allMonths.map(m=>{const [y,mo]=m.split("-");const label=new Date(y,mo-1).toLocaleDateString("en-IN",{month:"long",year:"numeric"});return<option key={m} value={m}>{label}</option>;})}
+            </select>
+          </div>
+          {/* Summary cards */}
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:18}}>
+            {[
+              ["Total Orders",monthOrders.length,"#cc0000","ti-clipboard-list"],
+              ["Revenue Collected",fmtM(monthRev),"#1d9e75","ti-currency-rupee"],
+              ["Advance Received",fmtM(monthAdv),"#185fa5","ti-cash"],
+              ["Due / Pending",fmtM(monthDue),"#854f0b","ti-clock-dollar"],
+              ["Delivered",monthDeli.length,"#0f6e56","ti-circle-check"],
+              ["Pending Orders",monthPend.length,"#a32d2d","ti-alert-circle"],
+            ].map(([l,v,c,ic])=>(
+              <div key={l} className="card" style={{padding:"14px 16px"}}>
+                <div style={{display:"flex",alignItems:"center",gap:7,marginBottom:7}}>
+                  <div style={{width:28,height:28,borderRadius:8,background:c+"18",display:"flex",alignItems:"center",justifyContent:"center"}}>
+                    <i className={`ti ${ic}`} style={{color:c,fontSize:14}}/>
+                  </div>
+                  <div style={{fontSize:10.5,color:"#bbb",fontWeight:500}}>{l}</div>
+                </div>
+                <div style={{fontSize:20,fontWeight:700,color:c}}>{v}</div>
+              </div>
+            ))}
+          </div>
+          {/* Wood & Product breakdown */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:18}}>
+            <div className="card">
+              <div style={{fontWeight:700,fontSize:13,marginBottom:12,color:"#555"}}>Wood Type Breakdown</div>
+              {woodBreakdown.length===0?<div style={{color:"#bbb",fontSize:13}}>No data</div>:woodBreakdown.map(([w,qty])=>(
+                <div key={w} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f5f5f3",fontSize:13}}>
+                  <span style={{color:"#555"}}>{w}</span>
+                  <span style={{fontWeight:700,color:"#1a1a1a"}}>{qty} units</span>
+                </div>
+              ))}
+            </div>
+            <div className="card">
+              <div style={{fontWeight:700,fontSize:13,marginBottom:12,color:"#555"}}>Product Breakdown</div>
+              {productBreakdown.length===0?<div style={{color:"#bbb",fontSize:13}}>No data</div>:productBreakdown.map(([p,count])=>(
+                <div key={p} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"6px 0",borderBottom:"1px solid #f5f5f3",fontSize:13}}>
+                  <span style={{color:"#555"}}>{p}</span>
+                  <span style={{fontWeight:700,color:"#1a1a1a"}}>{count} orders</span>
+                </div>
+              ))}
+            </div>
+          </div>
+          {/* Payment method breakdown */}
+          <div className="card" style={{marginBottom:18}}>
+            <div style={{fontWeight:700,fontSize:13,marginBottom:12,color:"#555"}}>Payment Method Summary</div>
+            {(()=>{
+              const pm=[...monthDeli.reduce((m,o)=>{const k=o.payMethod||"Unknown";m.set(k,(m.get(k)||{count:0,total:0}));const v=m.get(k);v.count++;v.total+=Number(o.total||0);return m;},new Map())];
+              return pm.length===0?<div style={{color:"#bbb",fontSize:13}}>No delivered orders this month</div>:pm.map(([method,{count,total}])=>(
+                <div key={method} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"7px 0",borderBottom:"1px solid #f5f5f3",fontSize:13}}>
+                  <span style={{color:"#555"}}>{method}</span>
+                  <span><b style={{color:"#1a1a1a"}}>{fmtM(total)}</b> <span style={{color:"#bbb",fontSize:11}}>({count} orders)</span></span>
+                </div>
+              ));
+            })()}
+          </div>
+          {/* Orders table for the month */}
+          <div style={{fontWeight:700,fontSize:13,marginBottom:10,color:"#555"}}>All Orders This Month ({monthOrders.length})</div>
+          <Table rows={monthOrders} cols={["id","customer","product","wood","qty","total","advance","pending","status"]}/>
         </div>
       )}
     </div>
