@@ -9,6 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css"/>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"></script>
 <!-- Firebase -->
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
@@ -82,19 +83,17 @@ const genId=()=>"HSM-"+Math.random().toString(36).toUpperCase().slice(2,8);
 const now2=()=>new Date().toLocaleString("en-IN");
 const fmtM=n=>"₹"+Number(n||0).toLocaleString("en-IN");
 const fmtD=d=>d?new Date(d).toLocaleDateString("en-IN"):"—";
-// Generate sequential order number label e.g. #001, #042
 const fmtON=n=>n?"#"+String(n).padStart(3,"0"):"—";
 
 const SEED=[
-  {id:"HSM-DEMO1",orderNum:1,customer:"Ramesh Sharma",mobile:"9876543210",address:"12 Gandhi Nagar",product:"Umbra Patti",wood:"Khair",size:'2"x4"x10ft',qty:50,advance:5000,pending:7500,total:12500,delivery:"2026-05-20",notes:"Smooth finish",status:S.PROD,created:now2(),createdBy:"Ravi Kumar",payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:""},
-  {id:"HSM-DEMO2",orderNum:2,customer:"Priya Patel",mobile:"9988776655",address:"Pune",product:"Door Frame",wood:"Sisam",size:'4"x3"x7ft',qty:10,advance:2000,pending:3000,total:5000,delivery:"2026-05-15",notes:"",status:S.RECV,created:now2(),createdBy:"Ravi Kumar",payMethod:"",payAt:"",receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:"",deliveredBy:""},
-  {id:"HSM-DEMO3",orderNum:3,customer:"Deepak Verma",mobile:"9123456789",address:"Nagpur",product:"Plank",wood:"Pine",size:'1"x6"x12ft',qty:100,advance:8000,pending:0,total:8000,delivery:"2026-05-10",notes:"",status:S.DELI,created:now2(),createdBy:"Ravi Kumar",payMethod:"UPI",payAt:now2(),receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:now2(),deliveredBy:"Ravi Kumar"},
+  {id:"HSM-DEMO1",orderNum:1,customer:"Ramesh Sharma",mobile:"9876543210",product:"Umbra Patti",wood:"Khair",size:'2"x4"x10ft',qty:50,advance:5000,pending:7500,total:12500,delivery:"2026-05-20",notes:"Smooth finish",status:S.PROD,created:now2(),createdBy:"Ravi Kumar",payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:""},
+  {id:"HSM-DEMO2",orderNum:2,customer:"Priya Patel",mobile:"9988776655",product:"Door Frame",wood:"Sisam",size:'4"x3"x7ft',qty:10,advance:2000,pending:3000,total:5000,delivery:"2026-05-15",notes:"",status:S.RECV,created:now2(),createdBy:"Ravi Kumar",payMethod:"",payAt:"",receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:"",deliveredBy:""},
+  {id:"HSM-DEMO3",orderNum:3,customer:"Deepak Verma",mobile:"9123456789",product:"Plank",wood:"Pine",size:'1"x6"x12ft',qty:100,advance:8000,pending:0,total:8000,delivery:"2026-05-10",notes:"",status:S.DELI,created:now2(),createdBy:"Ravi Kumar",payMethod:"UPI",payAt:now2(),receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:now2(),deliveredBy:"Ravi Kumar"},
 ];
 
-// ── QR CONTENT BUILDER ──
 function buildQRText(o){
   return "HSM ORDER\n"+
-    (o.orderNum?"Order No:"+fmtON(o.orderNum)+"\n":"")+
+    (o.orderNum?"Order:"+fmtON(o.orderNum)+"\n":"")+
     "ID:"+o.id+"\n"+
     "Customer:"+o.customer+"\n"+
     "Mobile:"+o.mobile+"\n"+
@@ -154,11 +153,13 @@ function QRSvg({order,size=180}){
 // ── DOWNLOAD QR ──
 function downloadQR(o){
   const size=220;
-  const padX=24, padTop=68, padBot=52;
+  const padX=24, padTop=56, padBot=44;
   const W=size+padX*2, H=size+padTop+padBot;
   const out=document.createElement("canvas");
   out.width=W; out.height=H;
   const ctx=out.getContext("2d");
+
+  // background + border
   ctx.fillStyle="#ffffff";
   ctx.fillRect(0,0,W,H);
   ctx.strokeStyle="#cc0000";
@@ -166,33 +167,30 @@ function downloadQR(o){
   ctx.beginPath();
   ctx.roundRect(2,2,W-4,H-4,12);
   ctx.stroke();
+
+  // logo
   ctx.fillStyle="#cc0000";
   ctx.font="bold 22px Arial";
   ctx.textAlign="center";
-  ctx.fillText("HSM",W/2,26);
+  ctx.fillText("HSM",W/2,28);
   ctx.fillStyle="#999999";
   ctx.font="8px Arial";
-  ctx.fillText("HANUMAN SAW MILL",W/2,38);
-  if(o.orderNum){
-    ctx.fillStyle="#cc0000";
-    ctx.font="bold 16px Arial";
-    ctx.fillText("Order "+fmtON(o.orderNum),W/2,56);
-  }
+  ctx.fillText("HANUMAN SAW MILL",W/2,40);
+
+  // draw QR onto a temp canvas then blit
   const tmp=document.createElement("canvas");
   const drawn=drawQROnCanvas(tmp, buildQRText(o), size);
   if(!drawn){alert("QR generation failed");return;}
   ctx.drawImage(tmp, padX, padTop, size, size);
+
+  // order id + customer
   ctx.fillStyle="#1a1a1a";
   ctx.font="bold 12px Arial";
   ctx.fillText(o.id, W/2, padTop+size+16);
   ctx.fillStyle="#555555";
   ctx.font="10px Arial";
   ctx.fillText(o.customer+" · "+o.mobile, W/2, padTop+size+30);
-  if(o.orderNum){
-    ctx.fillStyle="#cc0000";
-    ctx.font="bold 11px Arial";
-    ctx.fillText("Order "+fmtON(o.orderNum), W/2, padTop+size+44);
-  }
+
   const link=document.createElement("a");
   link.download="QR-"+o.id+".png";
   link.href=out.toDataURL("image/png");
@@ -210,7 +208,7 @@ function printQR(o){
   <style>body{font-family:Arial,sans-serif;padding:20px;background:#fff;text-align:center}
   .box{border:2px solid #cc0000;border-radius:12px;display:inline-block;padding:16px 20px;width:280px}
   .logo{font-size:26px;font-weight:900;color:#cc0000}
-  .order-num{font-size:20px;font-weight:900;color:#cc0000;margin:4px 0 8px}
+  .onum{font-size:22px;font-weight:900;color:#cc0000;margin:4px 0 8px}
   table{width:100%;font-size:11px;text-align:left;border-collapse:collapse}
   td{padding:3px 4px}td:first-child{color:#888}
   @media print{body{margin:0}}</style></head>
@@ -218,9 +216,9 @@ function printQR(o){
   <div class="box">
     <div class="logo">HSM</div>
     <div style="font-size:10px;color:#888;margin-bottom:4px">HANUMAN SAW MILL</div>
-    ${o.orderNum?`<div class="order-num">Order ${fmtON(o.orderNum)}</div>`:''}
+    ${o.orderNum?`<div class="onum">Order ${fmtON(o.orderNum)}</div>`:''}
     <img src="${qrDataUrl}" width="200" height="200" style="display:block;margin:0 auto 8px;image-rendering:pixelated;"/>
-    <div style="font-size:13px;font-weight:700;margin:6px 0">${o.id}</div>
+    <div style="font-size:12px;font-weight:700;color:#888;margin:4px 0">${o.id}</div>
     <table>
       <tr><td>Customer</td><td><b>${o.customer}</b></td></tr>
       <tr><td>Mobile</td><td>${o.mobile}</td></tr>
@@ -302,7 +300,6 @@ function App(){
   const [menuOpen,setMenuOpen]=useState(false);
   const [loading,setLoading]=useState(false);
   const [dbMode,setDbMode]=useState(!!window.db);
-  // compute next order number from existing orders
   const nextOrderNum=orders.length>0?Math.max(...orders.map(o=>o.orderNum||0))+1:1;
 
   // ── Firebase real-time listener ──
@@ -515,46 +512,29 @@ function Dashboard({orders,goto,user}){
 // ── NEW ORDER ──
 const NEW_ORDER_LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBottom:4};
 function NewOrder({user,onAdd,toast2,nextOrderNum}){
-  const initF=()=>({customer:"",mobile:"",product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",size:"",qty:"",advance:"",pending:"",total:"",delivery:"",notes:""});
+  const initF=()=>({customer:"",mobile:"",product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",advance:"",pending:"",total:"",delivery:"",notes:""});
   const [f,setF]=useState(initF);
   const [done,setDone]=useState(null);
-  const r={
-    customer:useRef(null),mobile:useRef(null),
-    product:useRef(null),wood:useRef(null),
-    dimL:useRef(null),dimW:useRef(null),dimT:useRef(null),
-    qty:useRef(null),total:useRef(null),advance:useRef(null),
-    delivery:useRef(null),notes:useRef(null),submit:useRef(null)
-  };
-  const TAB_ORDER=["customer","mobile","product","wood","dimL","dimW","dimT","qty","total","advance","delivery","notes","submit"];
-  const focusNext=(current)=>{
-    const idx=TAB_ORDER.indexOf(current);
-    if(idx===-1) return;
-    for(let i=idx+1;i<TAB_ORDER.length;i++){
-      const el=r[TAB_ORDER[i]]&&r[TAB_ORDER[i]].current;
-      if(el){el.focus();break;}
-    }
-  };
-  const onKey=(field)=>(e)=>{if(e.key==="Enter"){e.preventDefault();focusNext(field);}};
+  const r={customer:useRef(null),mobile:useRef(null),product:useRef(null),wood:useRef(null),dimL:useRef(null),dimW:useRef(null),dimT:useRef(null),qty:useRef(null),total:useRef(null),advance:useRef(null),delivery:useRef(null),notes:useRef(null),submit:useRef(null)};
+  const TAB=["customer","mobile","product","wood","dimL","dimW","dimT","qty","total","advance","delivery","notes","submit"];
+  const focusNext=cur=>{const i=TAB.indexOf(cur);for(let j=i+1;j<TAB.length;j++){const el=r[TAB[j]]&&r[TAB[j]].current;if(el){el.focus();break;}}};
+  const onKey=field=>e=>{if(e.key==="Enter"){e.preventDefault();focusNext(field);}};
   const upd=(k,v)=>setF(p=>{const n={...p,[k]:v};if(k==="advance"||k==="total")n.pending=Math.max(0,Number(n.total||0)-Number(n.advance||0)).toString();return n;});
   const sub=e=>{
     e.preventDefault();
     if(!f.customer||!f.mobile||!f.dimL||!f.dimW||!f.dimT||!f.qty){toast2("Fill all required fields","err");return;}
-    const sizeStr=f.dimL+'"'+'x'+f.dimW+'"'+'x'+f.dimT+'"';
+    const sizeStr=f.dimL+'"x'+f.dimW+'"x'+f.dimT+'"';
     const o={...f,orderNum:nextOrderNum,size:sizeStr,id:genId(),status:S.PROD,created:now2(),createdBy:user.name,qty:Number(f.qty),advance:Number(f.advance)||0,pending:Number(f.pending)||0,total:Number(f.total)||0,payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:""};
     onAdd(o);setDone(o);
   };
   if(done) return(
     <div style={{maxWidth:480,margin:"0 auto"}}>
       <div className="card" style={{textAlign:"center"}}>
-        <div style={{width:52,height:52,background:"#e1f5ee",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px"}}>
-          <i className="ti ti-check" style={{fontSize:26,color:"#1d9e75"}}/>
-        </div>
+        <div style={{width:52,height:52,background:"#e1f5ee",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 10px"}}><i className="ti ti-check" style={{fontSize:26,color:"#1d9e75"}}/></div>
         <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>Order Created!</div>
-        <div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>Order {fmtON(done.orderNum)}</div>
-        <div style={{fontSize:12,color:"#999",marginBottom:18}}>{done.id}</div>
-        <div style={{background:"#fafaf8",borderRadius:12,padding:14,display:"inline-block",marginBottom:18}}>
-          <QRSvg order={done}/>
-        </div>
+        <div style={{fontSize:26,fontWeight:900,color:"#cc0000",marginBottom:2}}>Order {fmtON(done.orderNum)}</div>
+        <div style={{fontSize:11,color:"#aaa",marginBottom:16}}>{done.id}</div>
+        <div style={{background:"#fafaf8",borderRadius:12,padding:14,display:"inline-block",marginBottom:16}}><QRSvg order={done}/></div>
         <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
           <button className="btn btn-red" onClick={()=>printQR(done)}><i className="ti ti-printer"/>Print QR</button>
           <button className="btn btn-green" onClick={()=>downloadQR(done)}><i className="ti ti-download"/>Download QR</button>
@@ -569,26 +549,21 @@ function NewOrder({user,onAdd,toast2,nextOrderNum}){
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18}}>
           <div style={{fontWeight:700,fontSize:15}}>Create New Order</div>
-          <div style={{background:"#fff3f3",border:"1.5px solid #ffcccc",borderRadius:10,padding:"6px 14px",fontSize:14,fontWeight:800,color:"#cc0000"}}>Order {fmtON(nextOrderNum)}</div>
+          <div style={{background:"#fff3f3",border:"1.5px solid #ffcccc",borderRadius:10,padding:"6px 16px",fontSize:15,fontWeight:900,color:"#cc0000"}}>Order {fmtON(nextOrderNum)}</div>
         </div>
         <form onSubmit={sub}>
           <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:13}}>
             <div><label style={lbl}>Customer Name *</label><input ref={r.customer} className="inp" value={f.customer} onChange={e=>upd("customer",e.target.value)} onKeyDown={onKey("customer")} placeholder="Full name"/></div>
             <div><label style={lbl}>Mobile Number *</label><div style={{display:"flex",gap:8}}><input ref={r.mobile} className="inp" value={f.mobile} onChange={e=>upd("mobile",e.target.value)} onKeyDown={onKey("mobile")} placeholder="10-digit mobile" style={{flex:1}}/>{f.mobile&&f.mobile.length>=10&&<a href={"tel:"+f.mobile} className="btn btn-green" style={{padding:"10px 14px",textDecoration:"none",whiteSpace:"nowrap"}}><i className="ti ti-phone"/>Call</a>}</div></div>
-            <div><label style={lbl}>Product Type *</label>
-              <select ref={r.product} className="inp" value={f.product} onChange={e=>upd("product",e.target.value)} onKeyDown={onKey("product")}>{PRODUCTS.map(p=><option key={p}>{p}</option>)}</select></div>
-            <div><label style={lbl}>Wood Type *</label>
-              <select ref={r.wood} className="inp" value={f.wood} onChange={e=>upd("wood",e.target.value)} onKeyDown={onKey("wood")}>{WOODS.map(w=><option key={w}>{w}</option>)}</select></div>
-            <div style={{gridColumn:"span 2"}}><label style={lbl}>Size / Dimensions (in inches) *</label><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Length</label><input ref={r.dimL} type="number" step="0.1" className="inp" value={f.dimL} onChange={e=>upd("dimL",e.target.value)} onKeyDown={onKey("dimL")} placeholder='e.g. 10'/></div><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Width</label><input ref={r.dimW} type="number" step="0.1" className="inp" value={f.dimW} onChange={e=>upd("dimW",e.target.value)} onKeyDown={onKey("dimW")} placeholder='e.g. 4'/></div><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Thickness</label><input ref={r.dimT} type="number" step="0.1" className="inp" value={f.dimT} onChange={e=>upd("dimT",e.target.value)} onKeyDown={onKey("dimT")} placeholder='e.g. 2'/></div></div></div>
+            <div><label style={lbl}>Product Type *</label><select ref={r.product} className="inp" value={f.product} onChange={e=>upd("product",e.target.value)} onKeyDown={onKey("product")}>{PRODUCTS.map(p=><option key={p}>{p}</option>)}</select></div>
+            <div><label style={lbl}>Wood Type *</label><select ref={r.wood} className="inp" value={f.wood} onChange={e=>upd("wood",e.target.value)} onKeyDown={onKey("wood")}>{WOODS.map(w=><option key={w}>{w}</option>)}</select></div>
+            <div style={{gridColumn:"span 2"}}><label style={lbl}>Size / Dimensions (inches) *</label><div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Length</label><input ref={r.dimL} type="number" step="0.1" className="inp" value={f.dimL} onChange={e=>upd("dimL",e.target.value)} onKeyDown={onKey("dimL")} placeholder="e.g. 10"/></div><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Width</label><input ref={r.dimW} type="number" step="0.1" className="inp" value={f.dimW} onChange={e=>upd("dimW",e.target.value)} onKeyDown={onKey("dimW")} placeholder="e.g. 4"/></div><div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Thickness</label><input ref={r.dimT} type="number" step="0.1" className="inp" value={f.dimT} onChange={e=>upd("dimT",e.target.value)} onKeyDown={onKey("dimT")} placeholder="e.g. 2"/></div></div></div>
             <div><label style={lbl}>Quantity *</label><input ref={r.qty} type="number" className="inp" value={f.qty} onChange={e=>upd("qty",e.target.value)} onKeyDown={onKey("qty")} placeholder="Units"/></div>
             <div><label style={lbl}>Total Amount (₹)</label><input ref={r.total} type="number" className="inp" value={f.total} onChange={e=>upd("total",e.target.value)} onKeyDown={onKey("total")} placeholder="0"/></div>
             <div><label style={lbl}>Advance Paid (₹)</label><input ref={r.advance} type="number" className="inp" value={f.advance} onChange={e=>upd("advance",e.target.value)} onKeyDown={onKey("advance")} placeholder="0"/></div>
             <div><label style={lbl}>Pending Amount (₹)</label><input type="number" className="inp" value={f.pending} readOnly style={{background:"#fafaf8",color:"#999"}} placeholder="Auto-calculated"/></div>
             <div><label style={lbl}>Delivery Date</label><input ref={r.delivery} type="date" className="inp" value={f.delivery} onChange={e=>upd("delivery",e.target.value)} onKeyDown={onKey("delivery")}/></div>
-            <div style={{gridColumn:"span 2"}}>
-              <label style={lbl}>Notes / Special Instructions</label>
-              <textarea ref={r.notes} className="inp" rows={2} value={f.notes} onChange={e=>upd("notes",e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();r.submit.current&&r.submit.current.focus();}}} placeholder="Special instructions... (Shift+Enter for new line)"/>
-            </div>
+            <div style={{gridColumn:"span 2"}}><label style={lbl}>Notes / Special Instructions</label><textarea ref={r.notes} className="inp" rows={2} value={f.notes} onChange={e=>upd("notes",e.target.value)} onKeyDown={e=>{if(e.key==="Enter"&&!e.shiftKey){e.preventDefault();r.submit.current&&r.submit.current.focus();}}} placeholder="Special instructions... (Shift+Enter for new line)"/></div>
           </div>
           <button ref={r.submit} type="submit" className="btn btn-red" style={{marginTop:18}}><i className="ti ti-check"/>Create Order & Generate QR</button>
         </form>
@@ -603,12 +578,7 @@ function OrderList({orders,updOrder,toast2,user}){
   const [fl,setFl]=useState("all");
   const [sel,setSel]=useState(null);
   const filtered=orders.filter(o=>{
-    const qL=q.toLowerCase().trim();
-    const m=!qL||
-      o.customer.toLowerCase().includes(qL)||
-      o.mobile.includes(qL)||
-      o.id.toLowerCase().includes(qL)||
-      (o.orderNum&&(String(o.orderNum)===qL||fmtON(o.orderNum).toLowerCase()===qL||("#"+String(o.orderNum))===qL));
+    const m=!q||o.customer.toLowerCase().includes(q.toLowerCase())||o.mobile.includes(q)||o.id.toLowerCase().includes(q.toLowerCase());
     const s=fl==="all"||o.status===fl;
     return m&&s;
   });
@@ -617,12 +587,7 @@ function OrderList({orders,updOrder,toast2,user}){
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setSel(null)}>← Back</button>
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:8}}>
-          <div>
-            {sel.orderNum&&<div style={{fontSize:20,fontWeight:900,color:"#cc0000",marginBottom:2}}>Order {fmtON(sel.orderNum)}</div>}
-            <div style={{fontSize:12,fontWeight:700,color:"#aaa"}}>{sel.id}</div>
-            <div style={{fontSize:17,fontWeight:700}}>{sel.customer}</div>
-            <div style={{fontSize:13,color:"#999"}}>{sel.mobile}</div>
-          </div>
+          <div><div style={{fontSize:12,fontWeight:700,color:"#cc0000"}}>{sel.id}</div><div style={{fontSize:17,fontWeight:700}}>{sel.customer}</div><div style={{fontSize:13,color:"#999"}}>{sel.mobile}</div></div>
           <StatusBadge s={sel.status}/>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,fontSize:13,marginBottom:18}}>
@@ -649,7 +614,7 @@ function OrderList({orders,updOrder,toast2,user}){
       <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
         <div style={{flex:1,minWidth:180,position:"relative"}}>
           <i className="ti ti-search" style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",color:"#bbb",fontSize:14}}/>
-          <input className="inp" style={{paddingLeft:34}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search name, mobile, order ID, order #..."/>
+          <input className="inp" style={{paddingLeft:34}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search name, mobile, order ID..."/>
         </div>
         <select className="inp" style={{width:"auto",minWidth:160}} value={fl} onChange={e=>setFl(e.target.value)}>
           <option value="all">All Status</option>
@@ -664,11 +629,8 @@ function OrderList({orders,updOrder,toast2,user}){
           <div key={o.id} onClick={()=>setSel(o)} className="card" style={{display:"flex",alignItems:"center",gap:14,cursor:"pointer",padding:"13px 16px",flexWrap:"wrap",transition:"border .15s",border:"1px solid #eeebe6"}}
             onMouseEnter={e=>e.currentTarget.style.borderColor="#cc000033"}
             onMouseLeave={e=>e.currentTarget.style.borderColor="#eeebe6"}>
-            <div style={{width:42,height:42,background:"#fff3f3",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-              <span style={{fontSize:11,fontWeight:900,color:"#cc0000",textAlign:"center",lineHeight:1.1}}>{o.orderNum?fmtON(o.orderNum):"—"}</span>
-            </div>
             <div style={{flex:1,minWidth:130}}>
-              <div style={{fontWeight:700,fontSize:11,color:"#aaa"}}>{o.id}</div>
+              <div style={{fontWeight:700,fontSize:12,color:"#cc0000"}}>{o.id}</div>
               <div style={{fontWeight:600,fontSize:14}}>{o.customer}</div>
               <div style={{fontSize:12,color:"#999"}}>{o.mobile}</div>
             </div>
@@ -697,7 +659,6 @@ function Factory({orders}){
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setSel(null)}>← Back</button>
       <div className="card" style={{textAlign:"center"}}>
         <div style={{fontSize:12,fontWeight:700,color:"#cc0000",marginBottom:4}}>{sel.id}</div>
-        {sel.orderNum&&<div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:4}}>Order {fmtON(sel.orderNum)}</div>}
         <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>{sel.customer}</div>
         <div style={{fontSize:13,color:"#999",marginBottom:16}}>{sel.mobile}</div>
         <div style={{background:"#fafaf8",borderRadius:12,padding:14,display:"inline-block",marginBottom:14}}>
@@ -722,11 +683,11 @@ function Factory({orders}){
           <div key={o.id} onClick={()=>setSel(o)} className="card" style={{display:"flex",alignItems:"center",gap:12,cursor:"pointer",padding:"13px 16px",flexWrap:"wrap",transition:"border .15s",border:"1px solid #eeebe6"}}
             onMouseEnter={e=>e.currentTarget.style.borderColor="#cc000033"}
             onMouseLeave={e=>e.currentTarget.style.borderColor="#eeebe6"}>
-            <div style={{width:42,height:42,background:"#fff3f3",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-              {o.orderNum?<span style={{fontSize:11,fontWeight:900,color:"#cc0000",textAlign:"center",lineHeight:1.1}}>{fmtON(o.orderNum)}</span>:<i className="ti ti-tool" style={{color:"#cc0000",fontSize:19}}/>}
+            <div style={{width:38,height:38,background:"#fff3f3",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center"}}>
+              <i className="ti ti-tool" style={{color:"#cc0000",fontSize:19}}/>
             </div>
             <div style={{flex:1}}>
-              <div style={{fontWeight:700,color:"#cc0000",fontSize:11}}>{o.id}</div>
+              <div style={{fontWeight:700,color:"#cc0000",fontSize:12}}>{o.id}</div>
               <div style={{fontWeight:600,fontSize:14}}>{o.customer}</div>
               <div style={{fontSize:12,color:"#999"}}>{o.product} · {o.wood} · {o.size} · Qty {o.qty}</div>
             </div>
@@ -747,42 +708,72 @@ function Receive({orders,updOrder,user,toast2}){
   const [found,setFound]=useState(null);
   const [mid,setMid]=useState("");
   const [scanning,setScanning]=useState(false);
+  const [camErr,setCamErr]=useState("");
   const vidRef=useRef(null);
   const stRef=useRef(null);
   const ivRef=useRef(null);
+  const lastScan=useRef("");
+
+  const findOrder=useCallback((q)=>{
+    const t=q.trim();
+    return orders.find(x=>
+      x.id===t||
+      x.mobile===t||
+      (x.orderNum&&(String(x.orderNum)===t||fmtON(x.orderNum)===t||("#"+String(x.orderNum))===t))
+    );
+  },[orders]);
 
   const stopCam=useCallback(()=>{
-    if(ivRef.current) clearInterval(ivRef.current);
-    if(stRef.current) stRef.current.getTracks().forEach(t=>t.stop());
-    stRef.current=null;setScanning(false);
+    if(ivRef.current){clearInterval(ivRef.current);ivRef.current=null;}
+    if(stRef.current){stRef.current.getTracks().forEach(t=>t.stop());stRef.current=null;}
+    setScanning(false);
   },[]);
 
-  const startCam=async()=>{
+  const startCam=useCallback(async()=>{
+    setCamErr("");
+    lastScan.current="";
     try{
-      const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+      const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}}});
       stRef.current=st;
-      if(vidRef.current) vidRef.current.srcObject=st;
+      if(vidRef.current){vidRef.current.srcObject=st;}
       setScanning(true);
       ivRef.current=setInterval(()=>{
-        if(!vidRef.current||!window.jsQR) return;
-        const cv=document.createElement("canvas");cv.width=vidRef.current.videoWidth;cv.height=vidRef.current.videoHeight;
-        const ctx=cv.getContext("2d");ctx.drawImage(vidRef.current,0,0);
+        const vid=vidRef.current;
+        if(!vid||vid.readyState<2||vid.videoWidth===0) return;
+        if(!window.jsQR) return;
+        const cv=document.createElement("canvas");
+        cv.width=vid.videoWidth; cv.height=vid.videoHeight;
+        const ctx=cv.getContext("2d");
+        ctx.drawImage(vid,0,0);
         const img=ctx.getImageData(0,0,cv.width,cv.height);
-        const code=window.jsQR(img.data,img.width,img.height);
-        if(code){const o=orders.find(x=>code.data.includes(x.id));if(o){stopCam();setFound(o);}}
-      },300);
-    }catch(e){toast2("Camera access denied","err");}
-  };
+        const code=window.jsQR(img.data,img.width,img.height,{inversionAttempts:"dontInvert"});
+        if(code&&code.data&&code.data!==lastScan.current){
+          lastScan.current=code.data;
+          // Try to find order ID in the scanned text
+          const lines=code.data.split("\n");
+          let o=null;
+          for(const line of lines){
+            const m=line.match(/ID:(.+)/);
+            if(m){o=orders.find(x=>x.id===m[1].trim());if(o) break;}
+          }
+          // Fallback: search full text
+          if(!o) o=orders.find(x=>code.data.includes(x.id));
+          if(o){stopCam();setFound(o);toast2("Order found: "+o.id);}
+          else{setTimeout(()=>{lastScan.current="";},2000);}
+        }
+      },250);
+    }catch(e){
+      setCamErr("Camera access denied. Please allow camera permissions and try again.");
+      toast2("Camera access denied","err");
+    }
+  },[orders,stopCam,toast2]);
 
   const search=()=>{
-    const q=mid.toLowerCase().trim();
-    const o=orders.find(x=>
-      x.id.toLowerCase()===q||
-      x.mobile===mid.trim()||
-      (x.orderNum&&(String(x.orderNum)===q||fmtON(x.orderNum).toLowerCase()===q||("#"+String(x.orderNum))===q))
-    );
+    const o=findOrder(mid);
     o?setFound(o):toast2("Order not found","err");
-  };=()=>{
+  };
+
+  const markRecv=()=>{
     if(found.status!==S.PROD){toast2("Already received","err");return;}
     updOrder(found.id,{status:S.RECV,receivedAt:now2(),receivedBy:user.name});
     toast2("Marked as Received at Office!");setFound(null);setMid("");
@@ -792,22 +783,30 @@ function Receive({orders,updOrder,user,toast2}){
 
   return(
     <div style={{maxWidth:500,margin:"0 auto"}}>
-      <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"/>
       {!found&&(
         <div className="card">
           <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>Scan QR Code to Receive</div>
-          <div style={{background:"#1a1a1a",borderRadius:13,overflow:"hidden",marginBottom:12,position:"relative",minHeight:210}}>
-            <video ref={vidRef} autoPlay playsInline muted style={{width:"100%",display:"block",maxHeight:270,objectFit:"cover"}}/>
+          <div style={{background:"#1a1a1a",borderRadius:13,overflow:"hidden",marginBottom:12,position:"relative",minHeight:220}}>
+            <video ref={vidRef} autoPlay playsInline muted style={{width:"100%",display:"block",maxHeight:280,objectFit:"cover"}}/>
             {!scanning&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:8}}>
               <i className="ti ti-qrcode" style={{fontSize:44,color:"#444"}}/>
               <div style={{color:"#666",fontSize:13}}>Camera not active</div>
             </div>}
-            {scanning&&<div style={{position:"absolute",inset:0,border:"3px solid #cc0000",borderRadius:13,pointerEvents:"none"}}/>}
+            {scanning&&<div style={{position:"absolute",inset:0,pointerEvents:"none"}}>
+              <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:180,height:180,border:"3px solid #cc0000",borderRadius:12}}/>
+              <div style={{position:"absolute",bottom:10,width:"100%",textAlign:"center",color:"#fff",fontSize:12,opacity:.8}}>Point at QR code</div>
+            </div>}
           </div>
-          <div style={{marginBottom:16}}>
+          {camErr&&<div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#cc0000",marginBottom:12}}>{camErr}</div>}
+          <div style={{marginBottom:14}}>
             {!scanning
               ?<button className="btn btn-red" style={{width:"100%",justifyContent:"center"}} onClick={startCam}><i className="ti ti-camera"/>Start Camera Scan</button>
               :<button className="btn btn-outline" style={{width:"100%",justifyContent:"center"}} onClick={stopCam}><i className="ti ti-player-stop"/>Stop Camera</button>}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+            <div style={{flex:1,height:1,background:"#eee"}}/>
+            <span style={{fontSize:11,color:"#bbb",flexShrink:0}}>OR SEARCH MANUALLY</span>
+            <div style={{flex:1,height:1,background:"#eee"}}/>
           </div>
           <div style={{display:"flex",gap:8}}>
             <input className="inp" value={mid} onChange={e=>setMid(e.target.value)} placeholder="Order #, Order ID or Mobile" onKeyDown={e=>e.key==="Enter"&&search()}/>
@@ -819,7 +818,7 @@ function Receive({orders,updOrder,user,toast2}){
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <div style={{fontWeight:700,fontSize:16}}>Order Found</div>
-            <button onClick={()=>setFound(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
+            <button onClick={()=>{setFound(null);setMid("");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
           </div>
           <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:14}}>
             {found.orderNum&&<div style={{fontSize:20,fontWeight:900,color:"#cc0000",marginBottom:2}}>Order {fmtON(found.orderNum)}</div>}
@@ -850,42 +849,50 @@ function Deliver({orders,updOrder,user,toast2}){
   const [pt,setPt]=useState("full");
   const [partial,setPartial]=useState("");
   const [scanning,setScanning]=useState(false);
+  const [camErr,setCamErr]=useState("");
   const vidRef=useRef(null);
   const stRef=useRef(null);
   const ivRef=useRef(null);
+  const lastScan=useRef("");
+
+  const findOrder=useCallback((q)=>{
+    const t=q.trim();
+    return orders.find(x=>x.id===t||x.mobile===t||(x.orderNum&&(String(x.orderNum)===t||fmtON(x.orderNum)===t||("#"+String(x.orderNum))===t)));
+  },[orders]);
 
   const stopCam=useCallback(()=>{
-    if(ivRef.current) clearInterval(ivRef.current);
-    if(stRef.current) stRef.current.getTracks().forEach(t=>t.stop());
-    stRef.current=null;setScanning(false);
+    if(ivRef.current){clearInterval(ivRef.current);ivRef.current=null;}
+    if(stRef.current){stRef.current.getTracks().forEach(t=>t.stop());stRef.current=null;}
+    setScanning(false);
   },[]);
 
-  const startCam=async()=>{
+  const startCam=useCallback(async()=>{
+    setCamErr("");lastScan.current="";
     try{
-      const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:"environment"}});
+      const st=await navigator.mediaDevices.getUserMedia({video:{facingMode:{ideal:"environment"},width:{ideal:1280},height:{ideal:720}}});
       stRef.current=st;
       if(vidRef.current) vidRef.current.srcObject=st;
       setScanning(true);
       ivRef.current=setInterval(()=>{
-        if(!vidRef.current||!window.jsQR) return;
-        const cv=document.createElement("canvas");cv.width=vidRef.current.videoWidth;cv.height=vidRef.current.videoHeight;
-        const ctx=cv.getContext("2d");ctx.drawImage(vidRef.current,0,0);
+        const vid=vidRef.current;
+        if(!vid||vid.readyState<2||vid.videoWidth===0||!window.jsQR) return;
+        const cv=document.createElement("canvas");cv.width=vid.videoWidth;cv.height=vid.videoHeight;
+        const ctx=cv.getContext("2d");ctx.drawImage(vid,0,0);
         const img=ctx.getImageData(0,0,cv.width,cv.height);
-        const code=window.jsQR(img.data,img.width,img.height);
-        if(code){const o=orders.find(x=>code.data.includes(x.id));if(o){stopCam();setFound(o);}}
-      },300);
-    }catch(e){toast2("Camera denied","err");}
-  };
+        const code=window.jsQR(img.data,img.width,img.height,{inversionAttempts:"dontInvert"});
+        if(code&&code.data&&code.data!==lastScan.current){
+          lastScan.current=code.data;
+          let o=null;
+          for(const line of code.data.split("\n")){const m=line.match(/ID:(.+)/);if(m){o=orders.find(x=>x.id===m[1].trim());if(o) break;}}
+          if(!o) o=orders.find(x=>code.data.includes(x.id));
+          if(o){stopCam();setFound(o);toast2("Order found: "+o.id);}
+          else setTimeout(()=>{lastScan.current="";},2000);
+        }
+      },250);
+    }catch(e){setCamErr("Camera access denied. Please allow camera permissions.");toast2("Camera access denied","err");}
+  },[orders,stopCam,toast2]);
 
-  const search=()=>{
-    const q=mid.toLowerCase().trim();
-    const o=orders.find(x=>
-      x.id.toLowerCase()===q||
-      x.mobile===mid.trim()||
-      (x.orderNum&&(String(x.orderNum)===q||fmtON(x.orderNum).toLowerCase()===q||("#"+String(x.orderNum))===q))
-    );
-    o?setFound(o):toast2("Order not found","err");
-  };
+  const search=()=>{const o=findOrder(mid);o?setFound(o):toast2("Order not found","err");};
 
   const markDel=()=>{
     if(found.status===S.PROD){toast2("Not yet received at office","err");return;}
@@ -901,21 +908,30 @@ function Deliver({orders,updOrder,user,toast2}){
 
   return(
     <div style={{maxWidth:500,margin:"0 auto"}}>
-      <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.min.js"/>
       {!found&&(
         <div className="card">
           <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>Scan to Deliver & Collect Payment</div>
-          <div style={{background:"#1a1a1a",borderRadius:13,overflow:"hidden",marginBottom:12,position:"relative",minHeight:200}}>
-            <video ref={vidRef} autoPlay playsInline muted style={{width:"100%",display:"block",maxHeight:250,objectFit:"cover"}}/>
+          <div style={{background:"#1a1a1a",borderRadius:13,overflow:"hidden",marginBottom:12,position:"relative",minHeight:220}}>
+            <video ref={vidRef} autoPlay playsInline muted style={{width:"100%",display:"block",maxHeight:280,objectFit:"cover"}}/>
             {!scanning&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:8}}>
               <i className="ti ti-qrcode" style={{fontSize:44,color:"#444"}}/>
               <div style={{color:"#666",fontSize:13}}>Camera not active</div>
             </div>}
+            {scanning&&<div style={{position:"absolute",inset:0,pointerEvents:"none"}}>
+              <div style={{position:"absolute",top:"50%",left:"50%",transform:"translate(-50%,-50%)",width:180,height:180,border:"3px solid #cc0000",borderRadius:12}}/>
+              <div style={{position:"absolute",bottom:10,width:"100%",textAlign:"center",color:"#fff",fontSize:12,opacity:.8}}>Point at QR code</div>
+            </div>}
           </div>
+          {camErr&&<div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#cc0000",marginBottom:12}}>{camErr}</div>}
           <div style={{marginBottom:14}}>
             {!scanning
-              ?<button className="btn btn-red" style={{width:"100%",justifyContent:"center"}} onClick={startCam}><i className="ti ti-camera"/>Start Camera</button>
-              :<button className="btn btn-outline" style={{width:"100%",justifyContent:"center"}} onClick={stopCam}><i className="ti ti-player-stop"/>Stop</button>}
+              ?<button className="btn btn-red" style={{width:"100%",justifyContent:"center"}} onClick={startCam}><i className="ti ti-camera"/>Start Camera Scan</button>
+              :<button className="btn btn-outline" style={{width:"100%",justifyContent:"center"}} onClick={stopCam}><i className="ti ti-player-stop"/>Stop Camera</button>}
+          </div>
+          <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14}}>
+            <div style={{flex:1,height:1,background:"#eee"}}/>
+            <span style={{fontSize:11,color:"#bbb",flexShrink:0}}>OR SEARCH MANUALLY</span>
+            <div style={{flex:1,height:1,background:"#eee"}}/>
           </div>
           <div style={{display:"flex",gap:8}}>
             <input className="inp" value={mid} onChange={e=>setMid(e.target.value)} placeholder="Order #, Order ID or Mobile" onKeyDown={e=>e.key==="Enter"&&search()}/>
@@ -927,7 +943,7 @@ function Deliver({orders,updOrder,user,toast2}){
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
             <div style={{fontWeight:700,fontSize:16}}>Payment & Delivery</div>
-            <button onClick={()=>setFound(null)} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
+            <button onClick={()=>{setFound(null);setMid("");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
           </div>
           <div style={{background:"#fafaf8",borderRadius:12,padding:13,marginBottom:13}}>
             {found.orderNum&&<div style={{fontSize:20,fontWeight:900,color:"#cc0000",marginBottom:2}}>Order {fmtON(found.orderNum)}</div>}
@@ -960,9 +976,7 @@ function Deliver({orders,updOrder,user,toast2}){
           <div style={{marginBottom:16}}>
             <div style={{fontSize:11.5,fontWeight:600,color:"#777",marginBottom:7}}>Payment Method</div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {PAY_M.map(m=>(
-                <button key={m} className="btn" onClick={()=>setPm(m)} style={{background:pm===m?"#1a1a1a":"#fff",color:pm===m?"#fff":"#555",border:`1.5px solid ${pm===m?"#1a1a1a":"#ddd"}`}}>{m}</button>
-              ))}
+              {PAY_M.map(m=>(<button key={m} className="btn" onClick={()=>setPm(m)} style={{background:pm===m?"#1a1a1a":"#fff",color:pm===m?"#fff":"#555",border:`1.5px solid ${pm===m?"#1a1a1a":"#ddd"}`}}>{m}</button>))}
             </div>
           </div>
           {found.status===S.DELI
@@ -982,14 +996,13 @@ function Reports({orders}){
   const tabs=[["daily","Daily Sales"],["pending","Pending Payments"],["delivered","Delivered"],["customers","Customer History"]];
   const TRow=({o,cols})=>{
     const fv=(k,v)=>{
-      if(k==="orderNum") return v?fmtON(v):"—";
       if(["total","advance","pending"].includes(k)) return fmtM(v);
       if(k==="status") return <StatusBadge s={v}/>;
       return v||"—";
     };
-    return<tr style={{borderBottom:"1px solid #fafaf8"}}>{cols.map(c=><td key={c} style={{padding:"9px 10px",fontSize:12.5,color:c==="orderNum"?"#cc0000":c==="id"?"#888":c==="pending"&&o.pending>0?"#cc0000":"#333",fontWeight:c==="orderNum"?"700":"400"}}>{fv(c,o[c])}</td>)}</tr>;
+    return<tr style={{borderBottom:"1px solid #fafaf8"}}>{cols.map(c=><td key={c} style={{padding:"9px 10px",fontSize:12.5,color:c==="id"?"#cc0000":c==="pending"&&o.pending>0?"#cc0000":"#333",fontWeight:c==="id"?"700":"400"}}>{fv(c,o[c])}</td>)}</tr>;
   };
-  const labels={orderNum:"Order #",id:"Order ID",customer:"Customer",mobile:"Mobile",product:"Product",wood:"Wood",qty:"Qty",total:"Total",advance:"Advance",pending:"Pending",status:"Status",payMethod:"Payment",deliveredAt:"Delivered",deliveredBy:"By"};
+  const labels={id:"Order ID",customer:"Customer",mobile:"Mobile",product:"Product",wood:"Wood",qty:"Qty",total:"Total",advance:"Advance",pending:"Pending",status:"Status",payMethod:"Payment",deliveredAt:"Delivered",deliveredBy:"By"};
   const Table=({rows,cols})=>rows.length===0
     ?<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No records</div>
     :<div style={{background:"#fff",borderRadius:14,border:"1px solid #eeebe6",overflow:"hidden"}}><div style={{overflowX:"auto"}}>
@@ -1011,7 +1024,7 @@ function Reports({orders}){
               <div key={l} className="card" style={{padding:"14px 16px"}}><div style={{fontSize:10.5,color:"#bbb",marginBottom:5}}>{l}</div><div style={{fontSize:22,fontWeight:700,color:c}}>{v}</div></div>
             ))}
           </div>
-          <Table rows={deli} cols={["orderNum","id","customer","product","qty","total","payMethod","deliveredAt"]}/>
+          <Table rows={deli} cols={["id","customer","product","qty","total","payMethod","deliveredAt"]}/>
         </div>
       )}
       {tab==="pending"&&(
@@ -1019,10 +1032,10 @@ function Reports({orders}){
           <div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:12,padding:"11px 16px",marginBottom:14,fontWeight:700,color:"#cc0000",fontSize:14}}>
             Total Pending: {fmtM(pend.reduce((a,o)=>a+o.pending,0))}
           </div>
-          <Table rows={pend} cols={["orderNum","id","customer","mobile","total","advance","pending","status"]}/>
+          <Table rows={pend} cols={["id","customer","mobile","total","advance","pending","status"]}/>
         </div>
       )}
-      {tab==="delivered"&&<Table rows={deli} cols={["orderNum","id","customer","product","wood","qty","total","deliveredAt","deliveredBy"]}/>}
+      {tab==="delivered"&&<Table rows={deli} cols={["id","customer","product","wood","qty","total","deliveredAt","deliveredBy"]}/>}
       {tab==="customers"&&(
         <div style={{display:"flex",flexDirection:"column",gap:9}}>
           {[...new Set(orders.map(o=>o.mobile))].map(mob=>{
