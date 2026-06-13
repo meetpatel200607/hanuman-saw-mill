@@ -325,11 +325,14 @@ function App(){
           <div style={{fontSize:9,color:"#555",letterSpacing:1.5,marginTop:2}}>HANUMAN SAW MILL</div>
         </div>
         <nav style={{flex:1,display:"flex",flexDirection:"column",gap:2}}>
-          {ALL_NAV.map(n=>(
+          {ALL_NAV.map(n=>{
+            const pendingDesigns=n.id==="design"?orders.filter(o=>o.needsDesign&&o.designStatus!=="Done").length:0;
+            return(
             <button key={n.id} className="nav-btn" onClick={()=>goto(n.id)} style={page===n.id?{background:"#cc0000",color:"#fff"}:{}}>
               <i className={`ti ${n.icon}`} style={{fontSize:17}}/>{n.label}
+              {pendingDesigns>0&&<span style={{marginLeft:"auto",background:page===n.id?"#fff":"#cc0000",color:page===n.id?"#cc0000":"#fff",borderRadius:10,padding:"1px 7px",fontSize:11,fontWeight:700}}>{pendingDesigns}</span>}
             </button>
-          ))}
+          );})}
         </nav>
         <div style={{borderTop:"1px solid #2a2a2a",paddingTop:12,marginTop:8}}>
           <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 10px",marginBottom:8}}>
@@ -349,7 +352,7 @@ function App(){
           <button onClick={()=>setMenuOpen(p=>!p)} style={{background:"none",border:"none",cursor:"pointer",fontSize:22,color:"#555",display:"none"}} id="mBtn"><i className="ti ti-menu-2"/></button>
           <style>{`@media(max-width:700px){#mBtn{display:block!important}}`}</style>
           <div style={{flex:1}}>
-            <div style={{fontSize:16,fontWeight:700,color:"#1a1a1a"}}>{ALL_NAV.find(n=>n.id===page)?.label||page==="design"?"Design":"Dashboard"}</div>
+            <div style={{fontSize:16,fontWeight:700,color:"#1a1a1a"}}>{ALL_NAV.find(n=>n.id===page)?.label||"Dashboard"}</div>
             <div style={{fontSize:11,color:"#bbb"}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
           </div>
           <div style={{background:"#fff8f8",border:"1px solid #ffdddd",borderRadius:8,padding:"3px 10px",fontSize:11,color:"#cc0000",fontWeight:600}}>{user.role}</div>
@@ -361,7 +364,7 @@ function App(){
           {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={orders} goto={goto}/>}
           {page==="orders"&&<OrderList orders={orders} updOrder={updOrder} delOrder={delOrder} toast2={toast2} user={user}/>}
           {page==="factory"&&<Factory orders={orders} delOrder={delOrder} user={user}/>}
-          {page==="design"&&<Design orders={orders}/>}
+          {page==="design"&&<Design orders={orders} updOrder={updOrder} toast2={toast2}/>}
           {page==="receive"&&<Receive orders={orders} updOrder={updOrder} user={user} toast2={toast2}/>}
           {page==="deliver"&&<Deliver orders={orders} updOrder={updOrder} user={user} toast2={toast2}/>}
           {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={orders}/>}
@@ -492,7 +495,7 @@ Thank you for your order! 🙏
 
 // ── NEW ORDER ──
 const LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBottom:4};
-const emptyItem=()=>({product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",total:"",advance:"",notes:""});
+const emptyItem=()=>({product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",total:"",advance:"",notes:"",needsDesign:false});
 
 function NewOrder({user,onAdd,toast2,orders,goto}){
   const usedNums=orders.map(o=>o.orderNum).filter(Boolean);
@@ -530,6 +533,7 @@ function NewOrder({user,onAdd,toast2,orders,goto}){
         total:Number(it.total)||0,advance:Number(it.advance)||0,
         pending:Math.max(0,(Number(it.total)||0)-(Number(it.advance)||0)),
         notes:it.notes,
+        needsDesign:!!it.needsDesign,designStatus:it.needsDesign?"Pending":"",
         status:S.PROD,created:now2(),createdBy:user.name,
         payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",
       });
@@ -553,9 +557,9 @@ function NewOrder({user,onAdd,toast2,orders,goto}){
           <button className="btn" style={{background:"#25D366",color:"#fff",fontSize:14,fontWeight:700}} onClick={()=>sendWhatsApp(done)}>
             <i className="ti ti-brand-whatsapp" style={{fontSize:18}}/>Send on WhatsApp
           </button>
-          <button className="btn btn-outline" style={{fontSize:13}} onClick={()=>goto("design")}>
-            <i className="ti ti-ruler-2"/>View Design
-          </button>
+          {done.some(o=>o.needsDesign)&&<button className="btn btn-outline" style={{fontSize:13}} onClick={()=>goto("design")}>
+            <i className="ti ti-pencil-ruler"/>View in Design Queue
+          </button>}
         </div>
 
         <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:16}}>
@@ -563,6 +567,7 @@ function NewOrder({user,onAdd,toast2,orders,goto}){
             <div key={o.id} style={{background:"#fafaf8",borderRadius:12,padding:12}}>
               <div style={{fontSize:12,fontWeight:700,color:"#cc0000",marginBottom:4}}>{i===0&&o.orderNum?`Order ${fmtON(o.orderNum)} · `:""}{o.id}</div>
               <div style={{fontSize:12,color:"#777",marginBottom:8}}>{o.product} · {o.wood} · {o.size} · Qty {o.qty}</div>
+              {o.needsDesign&&<div style={{display:"inline-block",background:"#fff3e0",color:"#a35a00",border:"1px solid #ffd9a0",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,marginBottom:8}}><i className="ti ti-pencil-ruler" style={{marginRight:4}}/>Sent for Design</div>}
               <div style={{background:"#fff",borderRadius:10,padding:8,display:"inline-block"}}><QRSvg order={o} size={140}/></div>
               <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:8,flexWrap:"wrap"}}>
                 <button className="btn btn-red" style={{padding:"7px 12px",fontSize:12}} onClick={()=>printQR(o)}><i className="ti ti-printer"/>Print</button>
@@ -632,6 +637,16 @@ function NewOrder({user,onAdd,toast2,orders,goto}){
                   <div><label style={LBL}>Advance Paid (₹)</label><input type="number" className="inp" value={it.advance} onChange={e=>updItem(i,"advance",e.target.value)} placeholder="0"/></div>
                   <div><label style={LBL}>Pending (₹)</label><input type="number" className="inp" readOnly value={Math.max(0,(Number(it.total)||0)-(Number(it.advance)||0))} style={{background:"#fafaf8",color:"#999"}} placeholder="Auto"/></div>
                   <div style={{gridColumn:"span 2"}}><label style={LBL}>Notes</label><textarea className="inp" rows={2} value={it.notes} onChange={e=>updItem(i,"notes",e.target.value)} placeholder="Special instructions..."/></div>
+                  <div style={{gridColumn:"span 2"}}>
+                    <button type="button" onClick={()=>updItem(i,"needsDesign",!it.needsDesign)}
+                      className="btn" style={{width:"100%",justifyContent:"center",
+                        background:it.needsDesign?"#fff3e0":"#fff",
+                        color:it.needsDesign?"#a35a00":"#777",
+                        border:`1.5px solid ${it.needsDesign?"#ffb74d":"#ddd"}`}}>
+                      <i className="ti ti-pencil-ruler"/>
+                      {it.needsDesign?"Marked for Design — this order needs to go to the design shop":"Send for Design? (tap to mark)"}
+                    </button>
+                  </div>
                 </div>
               </div>
             ))}
@@ -962,165 +977,68 @@ function Deliver({orders,updOrder,user,toast2}){
   );
 }
 
-// ── DESIGN ──
-const WOOD_COLORS={
-  "Khair":  {face:"#c8874a",top:"#a86835",side:"#8b5428",grain:"#b5743d"},
-  "Sisam":  {face:"#7a5230",top:"#5c3a1e",side:"#4a2e18",grain:"#6b4528"},
-  "Pine":   {face:"#e8c87a",top:"#c9a455",side:"#b08d40",grain:"#d4b468"},
-  "Teak":   {face:"#9c6b2e",top:"#7a5020",side:"#61400f",grain:"#8a5c22"},
-  "Saghwan":{face:"#b87840",top:"#8f5a28",side:"#74481c",grain:"#a56a34"},
-  "Deodar": {face:"#d4a86a",top:"#b88844",side:"#9a6e2c",grain:"#c2945a"},
-};
-const DEFAULT_WOOD_CLR={face:"#c8874a",top:"#a86835",side:"#8b5428",grain:"#b5743d"};
+// ── DESIGN (orders that need to be sent to the design shop) ──
+function Design({orders,updOrder,toast2}){
+  const flagged=orders.filter(o=>o.needsDesign);
+  const pending=flagged.filter(o=>o.designStatus!=="Done");
+  const done=flagged.filter(o=>o.designStatus==="Done");
 
-function WoodPiece({order,width=300}){
-  const canvasRef=useRef(null);
-  useEffect(()=>{
-    const canvas=canvasRef.current;if(!canvas)return;
-    const ctx=canvas.getContext("2d");
-    // Parse dims
-    const [L,W,T]=(order.size||"10x4x2").replace(/"/g,"").split("x").map(Number);
-    const l=isNaN(L)?10:L, w=isNaN(W)?4:W, t=isNaN(T)?2:T;
-    const clr=WOOD_COLORS[order.wood]||DEFAULT_WOOD_CLR;
+  const markDone=o=>{updOrder(o.id,{designStatus:"Done"});toast2("Marked as design done!");};
+  const markPending=o=>{updOrder(o.id,{designStatus:"Pending"});toast2("Moved back to pending");};
 
-    // Scale to canvas
-    const scale=width/Math.max(l,1);
-    const fW=l*scale, fH=w*scale*0.45;
-    const iso=t*scale*0.3;
-    const cW=fW+iso+20, cH=fH+iso+60;
-    canvas.width=cW; canvas.height=cH;
-    ctx.clearRect(0,0,cW,cH);
-
-    const ox=10, oy=iso+30;
-
-    // ── Top face ──
-    ctx.beginPath();
-    ctx.moveTo(ox,oy);
-    ctx.lineTo(ox+iso,oy-iso);
-    ctx.lineTo(ox+fW+iso,oy-iso);
-    ctx.lineTo(ox+fW,oy);
-    ctx.closePath();
-    ctx.fillStyle=clr.top;ctx.fill();
-    ctx.strokeStyle="rgba(0,0,0,.18)";ctx.lineWidth=1;ctx.stroke();
-
-    // ── Front face ──
-    ctx.beginPath();
-    ctx.moveTo(ox,oy);
-    ctx.lineTo(ox+fW,oy);
-    ctx.lineTo(ox+fW,oy+fH);
-    ctx.lineTo(ox,oy+fH);
-    ctx.closePath();
-    ctx.fillStyle=clr.face;ctx.fill();
-    ctx.strokeStyle="rgba(0,0,0,.12)";ctx.stroke();
-
-    // ── Wood grain on front face ──
-    ctx.save();ctx.beginPath();ctx.rect(ox,oy,fW,fH);ctx.clip();
-    ctx.strokeStyle=clr.grain;ctx.lineWidth=0.8;ctx.globalAlpha=0.5;
-    const numGrains=Math.max(3,Math.floor(fW/18));
-    for(let i=0;i<numGrains;i++){
-      const gx=ox+fW*(i+0.5)/numGrains+Math.sin(i*1.3)*4;
-      ctx.beginPath();ctx.moveTo(gx,oy);
-      ctx.bezierCurveTo(gx+Math.sin(i)*8,oy+fH*0.3,gx-Math.sin(i)*6,oy+fH*0.7,gx+Math.sin(i*0.7)*5,oy+fH);
-      ctx.stroke();
-    }
-    ctx.restore();ctx.globalAlpha=1;
-
-    // ── Right side face ──
-    ctx.beginPath();
-    ctx.moveTo(ox+fW,oy);
-    ctx.lineTo(ox+fW+iso,oy-iso);
-    ctx.lineTo(ox+fW+iso,oy-iso+fH);
-    ctx.lineTo(ox+fW,oy+fH);
-    ctx.closePath();
-    ctx.fillStyle=clr.side;ctx.fill();
-    ctx.strokeStyle="rgba(0,0,0,.15)";ctx.stroke();
-
-    // ── Labels ──
-    ctx.fillStyle="#333";ctx.font=`bold ${Math.max(10,width/28)}px Arial`;ctx.textAlign="center";
-    // Length arrow on front face
-    ctx.fillText(`${l}"`,ox+fW/2,oy+fH+16);
-    // Width arrow on side
-    ctx.save();ctx.translate(ox+fW+iso/2+10,oy-iso/2+fH/2);ctx.rotate(-Math.PI/6);
-    ctx.fillText(`${w}"`,0,0);ctx.restore();
-    // Thickness on top
-    ctx.save();ctx.translate(ox+fW+iso/2+8,oy-iso/2-4);
-    ctx.fillText(`${t}"`,0,0);ctx.restore();
-
-    // ── Order info banner ──
-    ctx.fillStyle="#cc0000";ctx.font=`bold ${Math.max(11,width/25)}px Arial`;ctx.textAlign="left";
-    ctx.fillText((order.orderNum?fmtON(order.orderNum)+" · ":"")+order.product,ox,22);
-    ctx.fillStyle="#666";ctx.font=`${Math.max(9,width/32)}px Arial`;
-    ctx.fillText(order.wood+" · "+order.customer,ox,38);
-
-  },[order,width]);
-  return <canvas ref={canvasRef} style={{display:"block",maxWidth:"100%",margin:"0 auto"}}/>;
-}
-
-function Design({orders}){
-  const [q,setQ]=useState("");
-  const [sel,setSel]=useState(null);
-  const active=orders.filter(o=>{
-    if(!q) return true;
-    const t=q.toLowerCase();
-    return o.customer.toLowerCase().includes(t)||o.id.toLowerCase().includes(t)||
-      (o.orderNum&&(String(o.orderNum)===t||fmtON(o.orderNum).toLowerCase()===t));
-  });
-
-  if(sel) return(
-    <div style={{maxWidth:600,margin:"0 auto"}}>
-      <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setSel(null)}>← Back to All Designs</button>
-      <div className="card">
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:8}}>
-          <div>
-            {sel.orderNum&&<div style={{fontSize:22,fontWeight:900,color:"#cc0000"}}>Order {fmtON(sel.orderNum)}</div>}
-            <div style={{fontSize:14,fontWeight:700}}>{sel.customer}</div>
-            <div style={{fontSize:12,color:"#999"}}>{sel.product} · {sel.wood} · {sel.size} · Qty {sel.qty}</div>
-          </div>
-          <StatusBadge s={sel.status}/>
-        </div>
-        <WoodPiece order={sel} width={480}/>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10,marginTop:18}}>
-          {[["Length",sel.size?.split("x")[0]||"—"],["Width",sel.size?.split("x")[1]||"—"],["Thickness",sel.size?.split("x")[2]||"—"],["Wood",sel.wood],["Product",sel.product],["Qty",sel.qty]].map(([k,v])=>(
-            <div key={k} style={{background:"#fafaf8",borderRadius:10,padding:"10px 12px",textAlign:"center"}}>
-              <div style={{fontSize:10,color:"#bbb",marginBottom:3}}>{k}</div>
-              <div style={{fontWeight:700,fontSize:14,color:"#cc0000"}}>{v}</div>
-            </div>
-          ))}
-        </div>
-        {sel.notes&&<div style={{marginTop:12,background:"#fffbea",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#7a5c00"}}>📝 {sel.notes}</div>}
+  const Row=({o,action})=>(
+    <div className="card" style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",flexWrap:"wrap",border:"1px solid #eeebe6"}}>
+      <div style={{width:44,height:44,background:"#fff3e0",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+        <i className="ti ti-pencil-ruler" style={{color:"#a35a00",fontSize:19}}/>
       </div>
+      <div style={{flex:1,minWidth:0}}>
+        <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+          {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:14}}>{fmtON(o.orderNum)}</span>}
+          <span style={{fontWeight:600,fontSize:14}}>{o.customer}</span>
+        </div>
+        <div style={{fontSize:12,color:"#999"}}>{o.product} · {o.wood} · {o.size} · Qty {o.qty}</div>
+        {o.notes&&<div style={{fontSize:11.5,color:"#a35a00",marginTop:2}}>📝 {o.notes}</div>}
+      </div>
+      <StatusBadge s={o.status}/>
+      {action}
     </div>
   );
 
   return(
     <div>
-      <div style={{marginBottom:16,position:"relative"}}>
-        <i className="ti ti-search" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#bbb",fontSize:14}}/>
-        <input className="inp" style={{paddingLeft:36}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search order # or customer..."/>
+      <div style={{background:"#fff3e0",border:"1px solid #ffd9a0",borderRadius:12,padding:"12px 16px",marginBottom:18,fontSize:13,color:"#a35a00"}}>
+        <i className="ti ti-info-circle" style={{marginRight:6}}/>
+        Orders marked <b>"Send for Design"</b> while creating the order appear here, so the team can remember to send them to the design shop.
       </div>
-      {active.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No orders found</div>}
-      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(280px,1fr))",gap:14}}>
-        {active.map(o=>(
-          <div key={o.id} className="card" style={{cursor:"pointer",padding:14}} onClick={()=>setSel(o)}>
-            <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:10}}>
-              <div>
-                <div style={{fontWeight:900,color:"#cc0000",fontSize:14}}>{o.orderNum?fmtON(o.orderNum):"—"}</div>
-                <div style={{fontWeight:600,fontSize:13}}>{o.customer}</div>
-                <div style={{fontSize:11,color:"#999"}}>{o.product} · {o.wood}</div>
-              </div>
-              <StatusBadge s={o.status}/>
-            </div>
-            <WoodPiece order={o} width={260}/>
-            <div style={{marginTop:10,display:"flex",justifyContent:"space-between",fontSize:11,color:"#999"}}>
-              <span>Size: <b style={{color:"#333"}}>{o.size}</b></span>
-              <span>Qty: <b style={{color:"#333"}}>{o.qty}</b></span>
-            </div>
-          </div>
+
+      <div style={{fontSize:12,fontWeight:700,color:"#cc0000",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>
+        To Be Sent for Design ({pending.length})
+      </div>
+      <div style={{display:"flex",flexDirection:"column",gap:9,marginBottom:24}}>
+        {pending.length===0&&<div style={{textAlign:"center",padding:30,color:"#bbb",background:"#fff",borderRadius:14}}>Nothing pending — all caught up!</div>}
+        {pending.map(o=>(
+          <Row key={o.id} o={o} action={
+            <button className="btn btn-green" style={{padding:"7px 12px",fontSize:12}} onClick={()=>markDone(o)}><i className="ti ti-check"/>Mark Sent</button>
+          }/>
         ))}
       </div>
+
+      {done.length>0&&<>
+        <div style={{fontSize:12,fontWeight:700,color:"#999",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>
+          Already Sent ({done.length})
+        </div>
+        <div style={{display:"flex",flexDirection:"column",gap:9}}>
+          {done.map(o=>(
+            <Row key={o.id} o={o} action={
+              <button className="btn btn-outline" style={{padding:"7px 12px",fontSize:12}} onClick={()=>markPending(o)}><i className="ti ti-arrow-back-up"/>Undo</button>
+            }/>
+          ))}
+        </div>
+      </>}
     </div>
   );
 }
+
 
 // ── REPORTS ──
 function Reports({orders}){
