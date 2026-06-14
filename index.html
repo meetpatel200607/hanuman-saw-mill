@@ -1,4 +1,3 @@
-
 <!DOCTYPE html>
 <html lang="en">
 <head>
@@ -10,7 +9,7 @@
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@tabler/icons-webfont@2.47.0/tabler-icons.min.css"/>
 <script src="https://cdn.jsdelivr.net/npm/qrcode-generator@1.4.4/qrcode.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@zxing/library@0.20.0/umd/index.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <style>
@@ -181,47 +180,119 @@ function printInvoice(o){
   w.document.close();
 }
 
-// ── SHARED ZXING SCANNER COMPONENT ──
+// ── SHARED QR SCANNER COMPONENT (getUserMedia + jsQR — works across mobile/laptop/tablet) ──
 function QRScanner({onResult,onError}){
   const vidRef=useRef(null);
-  const readerRef=useRef(null);
+  const canvasRef=useRef(null);
+  const streamRef=useRef(null);
+  const rafRef=useRef(null);
+  const lastRef=useRef("");
   const [active,setActive]=useState(false);
   const [err,setErr]=useState("");
+  const [devices,setDevices]=useState([]);
+  const [deviceId,setDeviceId]=useState("");
 
-  const stop=useCallback(()=>{
-    if(readerRef.current){try{readerRef.current.reset();}catch(e){}}
-    readerRef.current=null;setActive(false);
+  // Enumerate cameras once (helps on tablets/laptops with multiple cameras)
+  useEffect(()=>{
+    if(!navigator.mediaDevices?.enumerateDevices) return;
+    navigator.mediaDevices.enumerateDevices().then(list=>{
+      const cams=list.filter(d=>d.kind==="videoinput");
+      setDevices(cams);
+    }).catch(()=>{});
   },[]);
 
-  const start=useCallback(async()=>{
-    setErr("");
-    if(!window.ZXing){setErr("Scanner library not loaded. Please refresh.");return;}
-    try{
-      const hints=new Map();
-      hints.set(window.ZXing.DecodeHintType.TRY_HARDER,true);
-      const reader=new window.ZXing.BrowserMultiFormatReader(hints,500);
-      readerRef.current=reader;
-      setActive(true);
-      await reader.decodeFromVideoDevice(null,vidRef.current,(result,err2)=>{
-        if(result){
-          const text=result.getText();
-          stop();
-          onResult(text);
+  const stop=useCallback(()=>{
+    if(rafRef.current){cancelAnimationFrame(rafRef.current);rafRef.current=null;}
+    if(streamRef.current){streamRef.current.getTracks().forEach(t=>t.stop());streamRef.current=null;}
+    if(vidRef.current){vidRef.current.srcObject=null;}
+    setActive(false);
+  },[]);
+
+  const tick=useCallback(()=>{
+    const video=vidRef.current,canvas=canvasRef.current;
+    if(!video||!canvas){rafRef.current=requestAnimationFrame(tick);return;}
+    if(video.readyState===video.HAVE_ENOUGH_DATA && video.videoWidth>0){
+      canvas.width=video.videoWidth;
+      canvas.height=video.videoHeight;
+      const ctx=canvas.getContext("2d",{willReadFrequently:true});
+      ctx.drawImage(video,0,0,canvas.width,canvas.height);
+      try{
+        const img=ctx.getImageData(0,0,canvas.width,canvas.height);
+        if(window.jsQR){
+          const code=window.jsQR(img.data,img.width,img.height,{inversionAttempts:"attemptBoth"});
+          if(code&&code.data){
+            if(code.data!==lastRef.current){
+              lastRef.current=code.data;
+              stop();
+              onResult(code.data);
+              return;
+            }
+          }
         }
-      });
+      }catch(e){/* ignore frame errors */}
+    }
+    rafRef.current=requestAnimationFrame(tick);
+  },[onResult,stop]);
+
+  const start=useCallback(async(forceDeviceId)=>{
+    setErr("");
+    if(!window.jsQR){setErr("Scanner library still loading — please wait a moment and tap Start again.");return;}
+    if(!navigator.mediaDevices?.getUserMedia){setErr("Camera not supported on this browser.");return;}
+    try{
+      // Stop any existing stream first
+      if(streamRef.current){streamRef.current.getTracks().forEach(t=>t.stop());streamRef.current=null;}
+      const idToUse=forceDeviceId||deviceId;
+      const constraints=idToUse
+        ?{video:{deviceId:{exact:idToUse}}}
+        :{video:{facingMode:{ideal:"environment"}}};
+      let stream;
+      try{
+        stream=await navigator.mediaDevices.getUserMedia(constraints);
+      }catch(e1){
+        // Fallback to any camera if the preferred one fails
+        stream=await navigator.mediaDevices.getUserMedia({video:true});
+      }
+      streamRef.current=stream;
+      lastRef.current="";
+      const video=vidRef.current;
+      video.srcObject=stream;
+      video.setAttribute("playsinline","true");
+      video.setAttribute("muted","true");
+      video.muted=true;
+      await video.play().catch(()=>{});
+      // refresh device list with labels now that permission is granted
+      if(navigator.mediaDevices?.enumerateDevices){
+        navigator.mediaDevices.enumerateDevices().then(list=>{
+          setDevices(list.filter(d=>d.kind==="videoinput"));
+        }).catch(()=>{});
+      }
+      setActive(true);
+      rafRef.current=requestAnimationFrame(tick);
     }catch(e){
-      setErr("Camera access denied. Please allow camera and try again.");
+      console.error("Camera error",e);
+      let msg="Camera access denied. Please allow camera permission in your browser settings and try again.";
+      if(e.name==="NotFoundError") msg="No camera found on this device.";
+      if(e.name==="NotAllowedError") msg="Camera permission denied. Please allow camera access for this site.";
+      if(e.name==="NotReadableError") msg="Camera is being used by another app. Close it and try again.";
+      setErr(msg);
       if(onError) onError(e);
       setActive(false);
     }
-  },[stop,onResult,onError]);
+  },[deviceId,tick,onResult,onError]);
 
   useEffect(()=>()=>stop(),[stop]);
+
+  const switchCamera=e=>{
+    const id=e.target.value;
+    setDeviceId(id);
+    if(active) start(id);
+  };
 
   return(
     <div>
       <div style={{background:"#1a1a1a",borderRadius:13,overflow:"hidden",marginBottom:12,position:"relative",minHeight:240}}>
-        <video ref={vidRef} style={{width:"100%",display:"block",maxHeight:280,objectFit:"cover"}}/>
+        <video ref={vidRef} playsInline muted autoPlay style={{width:"100%",display:"block",maxHeight:280,objectFit:"cover"}}/>
+        <canvas ref={canvasRef} style={{display:"none"}}/>
         {!active&&<div style={{position:"absolute",inset:0,display:"flex",alignItems:"center",justifyContent:"center",flexDirection:"column",gap:8}}>
           <i className="ti ti-qrcode" style={{fontSize:48,color:"#444"}}/>
           <div style={{color:"#666",fontSize:13}}>Camera not active</div>
@@ -232,8 +303,12 @@ function QRScanner({onResult,onError}){
         </div>}
       </div>
       {err&&<div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#cc0000",marginBottom:12}}>{err}</div>}
+      {devices.length>1&&<select className="inp" style={{marginBottom:10}} value={deviceId} onChange={switchCamera}>
+        <option value="">Auto (Back Camera)</option>
+        {devices.map((d,i)=><option key={d.deviceId} value={d.deviceId}>{d.label||`Camera ${i+1}`}</option>)}
+      </select>}
       {!active
-        ?<button className="btn btn-red" style={{width:"100%",justifyContent:"center"}} onClick={start}><i className="ti ti-camera"/>Start Camera Scan</button>
+        ?<button className="btn btn-red" style={{width:"100%",justifyContent:"center"}} onClick={()=>start()}><i className="ti ti-camera"/>Start Camera Scan</button>
         :<button className="btn btn-outline" style={{width:"100%",justifyContent:"center"}} onClick={stop}><i className="ti ti-player-stop"/>Stop Camera</button>}
     </div>
   );
