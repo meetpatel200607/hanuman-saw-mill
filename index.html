@@ -809,12 +809,130 @@ function NewOrder({user,onAdd,toast2,orders,goto}){
   );
 }
 
+// ── EDIT ORDER (Admin only) ──
+function EditOrder({order,orders,onSave,onCancel,toast2}){
+  const [f,setF]=useState({
+    customer:order.customer||"",
+    mobile:order.mobile||"",
+    product:order.product||PRODUCTS[0],
+    wood:order.wood||"Khair",
+    dimL:order.size?order.size.replace(/"/g,"").split("x")[0]:"",
+    dimW:order.size?order.size.replace(/"/g,"").split("x")[1]:"",
+    dimT:order.size?order.size.replace(/"/g,"").split("x")[2]:"",
+    qty:String(order.qty||""),
+    total:String(order.total||""),
+    advance:String(order.advance||""),
+    advPayMethod:order.advPayMethod||"Cash",
+    delivery:order.delivery||"",
+    notes:order.notes||"",
+    needsDesign:!!order.needsDesign,
+  });
+  const upd=(k,v)=>setF(p=>{
+    const n={...p,[k]:v};
+    if(k==="advance"||k==="total") n.pending=Math.max(0,(Number(n.total)||0)-(Number(n.advance)||0));
+    return n;
+  });
+  const pending=Math.max(0,(Number(f.total)||0)-(Number(f.advance)||0));
+
+  const sub=e=>{
+    e.preventDefault();
+    if(!f.customer||!f.mobile||!f.dimL||!f.dimW||!f.dimT||!f.qty){toast2("Fill all required fields","err");return;}
+    const size=f.dimL+'"x'+f.dimW+'"x'+f.dimT+'"';
+    onSave(order.id,{
+      customer:f.customer,mobile:f.mobile,product:f.product,wood:f.wood,
+      size,qty:Number(f.qty),total:Number(f.total)||0,advance:Number(f.advance)||0,
+      pending,advPayMethod:f.advPayMethod,delivery:f.delivery,notes:f.notes,needsDesign:f.needsDesign,
+      designStatus:f.needsDesign?(order.designStatus||"Pending"):order.designStatus,
+    });
+  };
+
+  const lbl={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBottom:4};
+  return(
+    <div style={{maxWidth:660,margin:"0 auto"}}>
+      <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={onCancel}>← Cancel</button>
+      <div className="card">
+        {/* Edit header with change indicator */}
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,flexWrap:"wrap",gap:8}}>
+          <div style={{fontWeight:700,fontSize:15}}>Edit Order</div>
+          <div style={{display:"flex",gap:8,alignItems:"center"}}>
+            {order.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:16}}>Order {fmtON(order.orderNum)}</span>}
+            <StatusBadge s={order.status}/>
+          </div>
+        </div>
+        <div style={{fontSize:11,color:"#bbb",marginBottom:18}}>
+          Created {order.created} by {order.createdBy}
+          {order.lastEditedAt&&` · Last edited ${order.lastEditedAt} by ${order.lastEditedBy}`}
+        </div>
+
+        {/* Warning for delivered orders */}
+        {order.status===S.DELI&&<div style={{background:"#fffbea",border:"1px solid #ffe58f",borderRadius:10,padding:"10px 14px",fontSize:12,color:"#7a5c00",marginBottom:16}}>
+          <i className="ti ti-alert-triangle" style={{marginRight:6}}/>This order is already delivered. Changes will update the record but not affect the invoice already printed.
+        </div>}
+
+        <form onSubmit={sub}>
+          <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#888",marginBottom:10,textTransform:"uppercase",letterSpacing:.5}}>Customer</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div><label style={lbl}>Customer Name *</label><input className="inp" value={f.customer} onChange={e=>upd("customer",e.target.value)} placeholder="Full name"/></div>
+              <div><label style={lbl}>Mobile Number *</label><input className="inp" value={f.mobile} onChange={e=>upd("mobile",e.target.value)} placeholder="10-digit mobile"/></div>
+            </div>
+          </div>
+
+          <div style={{border:"1.5px solid #eeebe6",borderRadius:13,padding:14,marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#cc0000",marginBottom:10,textTransform:"uppercase",letterSpacing:.5}}>Order Details</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div><label style={lbl}>Product Type *</label><select className="inp" value={f.product} onChange={e=>upd("product",e.target.value)}>{PRODUCTS.map(p=><option key={p}>{p}</option>)}</select></div>
+              <div><label style={lbl}>Wood Type *</label><select className="inp" value={f.wood} onChange={e=>upd("wood",e.target.value)}>{WOODS.map(w=><option key={w}>{w}</option>)}</select></div>
+              <div style={{gridColumn:"span 2"}}>
+                <label style={lbl}>Size / Dimensions (inches) *</label>
+                <div style={{display:"grid",gridTemplateColumns:"1fr 1fr 1fr",gap:8}}>
+                  <div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Length</label><input type="number" step="0.1" className="inp" value={f.dimL} onChange={e=>upd("dimL",e.target.value)} placeholder="10"/></div>
+                  <div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Width</label><input type="number" step="0.1" className="inp" value={f.dimW} onChange={e=>upd("dimW",e.target.value)} placeholder="4"/></div>
+                  <div><label style={{fontSize:11,color:"#999",display:"block",marginBottom:3}}>Thickness</label><input type="number" step="0.1" className="inp" value={f.dimT} onChange={e=>upd("dimT",e.target.value)} placeholder="2"/></div>
+                </div>
+              </div>
+              <div><label style={lbl}>Quantity *</label><input type="number" className="inp" value={f.qty} onChange={e=>upd("qty",e.target.value)} placeholder="Units"/></div>
+              <div><label style={lbl}>Delivery Date</label><input type="date" className="inp" value={f.delivery} onChange={e=>upd("delivery",e.target.value)}/></div>
+              <div style={{gridColumn:"span 2"}}><label style={lbl}>Notes</label><textarea className="inp" rows={2} value={f.notes} onChange={e=>upd("notes",e.target.value)} placeholder="Special instructions..."/></div>
+            </div>
+          </div>
+
+          <div style={{border:"1.5px solid #eeebe6",borderRadius:13,padding:14,marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#888",marginBottom:10,textTransform:"uppercase",letterSpacing:.5}}>Payment</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div><label style={lbl}>Total Amount (₹)</label><input type="number" className="inp" value={f.total} onChange={e=>upd("total",e.target.value)} placeholder="0"/></div>
+              <div><label style={lbl}>Advance Paid (₹)</label><input type="number" className="inp" value={f.advance} onChange={e=>upd("advance",e.target.value)} placeholder="0"/></div>
+              <div><label style={lbl}>Pending (₹)</label><input type="number" className="inp" readOnly value={pending} style={{background:"#fafaf8",color:"#999"}}/></div>
+              <div>
+                <label style={lbl}>Advance Payment Method</label>
+                <select className="inp" value={f.advPayMethod} onChange={e=>upd("advPayMethod",e.target.value)}>{PAY_M.map(m=><option key={m}>{m}</option>)}</select>
+              </div>
+            </div>
+          </div>
+
+          <div style={{marginBottom:16}}>
+            <button type="button" onClick={()=>upd("needsDesign",!f.needsDesign)} className="btn" style={{width:"100%",justifyContent:"center",background:f.needsDesign?"#fff3e0":"#fff",color:f.needsDesign?"#a35a00":"#777",border:`1.5px solid ${f.needsDesign?"#ffb74d":"#ddd"}`}}>
+              <i className="ti ti-pencil-ruler"/>{f.needsDesign?"Marked for Design":"Send for Design? (tap to mark)"}
+            </button>
+          </div>
+
+          <div style={{display:"flex",gap:10}}>
+            <button type="button" className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={onCancel}>Cancel</button>
+            <button type="submit" className="btn btn-red" style={{flex:2,justifyContent:"center",fontSize:15}}><i className="ti ti-device-floppy"/>Save Changes</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ── ORDER LIST ──
 function OrderList({orders,updOrder,delOrder,toast2,user}){
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
   const [sel,setSel]=useState(null);
   const [delTarget,setDelTarget]=useState(null);
+  const [editTarget,setEditTarget]=useState(null);
 
   const matchQ=(o,q)=>{
     if(!q) return true;
@@ -823,8 +941,23 @@ function OrderList({orders,updOrder,delOrder,toast2,user}){
       (o.orderNum&&(String(o.orderNum)===t||fmtON(o.orderNum).toLowerCase()===t||("#"+String(o.orderNum))===t));
   };
   const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
-
   const doDelete=(o)=>{setDelTarget(o);setSel(null);};
+
+  // ── EDIT VIEW ──
+  if(editTarget) return(
+    <EditOrder
+      order={editTarget}
+      orders={orders}
+      onSave={(id,patch)=>{
+        updOrder(id,{...patch,lastEditedAt:now2(),lastEditedBy:user.name});
+        toast2("Order updated successfully!");
+        setSel({...editTarget,...patch,lastEditedAt:now2(),lastEditedBy:user.name});
+        setEditTarget(null);
+      }}
+      onCancel={()=>setEditTarget(null)}
+      toast2={toast2}
+    />
+  );
 
   if(sel) return(
     <div style={{maxWidth:560,margin:"0 auto"}}>
@@ -837,17 +970,23 @@ function OrderList({orders,updOrder,delOrder,toast2,user}){
             <div style={{fontSize:17,fontWeight:700}}>{sel.customer}</div>
             <div style={{fontSize:13,color:"#999"}}>{sel.mobile}</div>
           </div>
-          <div style={{display:"flex",gap:8,alignItems:"flex-start"}}>
+          <div style={{display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
             <StatusBadge s={sel.status}/>
+            {["Admin"].includes(user.role)&&<button className="btn btn-outline" style={{padding:"5px 10px",fontSize:12}} onClick={()=>setEditTarget(sel)}><i className="ti ti-edit"/>Edit</button>}
             {["Admin"].includes(user.role)&&<button className="btn btn-danger" style={{padding:"5px 10px",fontSize:12}} onClick={()=>doDelete(sel)}><i className="ti ti-trash"/>Delete</button>}
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,fontSize:13,marginBottom:18}}>
           {[["Product",sel.product],["Wood",sel.wood],["Size",sel.size],["Quantity",sel.qty],
-            ...(["Admin","Accountant"].includes(user.role)?[["Total",fmtM(sel.total)],["Advance",fmtM(sel.advance)],["Pending",fmtM(sel.pending)]]:[] ),
+            ...(["Admin","Accountant"].includes(user.role)?[["Total",fmtM(sel.total)],["Advance",fmtM(sel.advance)],["Advance Via",sel.advPayMethod||"—"],["Pending",fmtM(sel.pending)]]:[] ),
             ["Delivery",fmtD(sel.delivery)],
-            ...(sel.deliveredLocation?[["Collected",sel.deliveredLocation]]:[])].map(([k,v])=>(
-            <div key={k}><div style={{fontSize:10.5,color:"#bbb",marginBottom:2}}>{k}</div><div style={{fontWeight:600}}>{v}</div></div>
+            ...(sel.deliveredLocation?[["Collected",sel.deliveredLocation]]:[]),
+            ...(sel.lastEditedAt?[["Last Edited",sel.lastEditedAt+" by "+sel.lastEditedBy]]:[])
+          ].map(([k,v])=>(
+            <div key={k} style={{gridColumn:k==="Last Edited"?"span 2":undefined}}>
+              <div style={{fontSize:10.5,color:"#bbb",marginBottom:2}}>{k}</div>
+              <div style={{fontWeight:600,fontSize:k==="Last Edited"?11:13,color:k==="Last Edited"?"#bbb":"#1a1a1a"}}>{v}</div>
+            </div>
           ))}
           {sel.notes&&<div style={{gridColumn:"span 2"}}><div style={{fontSize:10.5,color:"#bbb",marginBottom:2}}>Notes</div><div style={{color:"#555",fontSize:12}}>{sel.notes}</div></div>}
         </div>
@@ -1342,6 +1481,13 @@ function Reports({orders}){
   const atOffice=dayDeli.filter(o=>o.deliveredLocation==="At Office").length;
   const atProduction=dayDeli.filter(o=>o.deliveredLocation==="At Production").length;
 
+  // Advance cash received on this day (orders created today with Cash advance)
+  const dayAdvOrders=orders.filter(o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===dateSel&&Number(o.advance)>0;});
+  const dayAdvCash=dayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash").reduce((a,o)=>a+Number(o.advance),0);
+  const dayAdvUPI=dayAdvOrders.filter(o=>o.advPayMethod==="UPI").reduce((a,o)=>a+Number(o.advance),0);
+  // Total cash in hand = final cash payments + advance cash received today
+  const totalCashInHand=cashTotal+dayAdvCash;
+
   // ── Cash Tally (per-date, stored in localStorage) ──
   useEffect(()=>{
     try{
@@ -1354,14 +1500,23 @@ function Reports({orders}){
     try{localStorage.setItem("hsm_cash_tally_"+dateSel,v);}catch(e){}
   };
   const tallyEntered=cashTally!==""&&!isNaN(Number(cashTally));
-  const diff=tallyEntered?Number(cashTally)-cashTotal:0;
+  const diff=tallyEntered?Number(cashTally)-totalCashInHand:0;
 
-  // ── MONTHLY TAB ──
+  // ── MONTHLY TAB — includes both orders placed AND delivered, plus advance cash ──
+  const placedMonthMap={};
+  orders.forEach(o=>{
+    const p=parseLocaleDate(o.created);
+    if(!p) return;
+    if(!placedMonthMap[p.monthKey]) placedMonthMap[p.monthKey]={label:p.monthLabel,count:0,value:0};
+    placedMonthMap[p.monthKey].count++;
+    placedMonthMap[p.monthKey].value+=Number(o.total)||0;
+  });
+
   const monthMap={};
   deli.forEach(o=>{
     const p=parseLocaleDate(o.deliveredAt);
     if(!p) return;
-    if(!monthMap[p.monthKey]) monthMap[p.monthKey]={label:p.monthLabel,orders:[],revenue:0,cashCount:0,cashTotal:0,upiCount:0,upiTotal:0,office:0,production:0};
+    if(!monthMap[p.monthKey]) monthMap[p.monthKey]={label:p.monthLabel,orders:[],revenue:0,cashCount:0,cashTotal:0,upiCount:0,upiTotal:0,office:0,production:0,advCash:0,advUPI:0};
     const m=monthMap[p.monthKey];
     m.orders.push(o);m.revenue+=Number(o.total);
     if(o.payMethod==="Cash"){m.cashCount++;m.cashTotal+=Number(o.total);}
@@ -1369,9 +1524,22 @@ function Reports({orders}){
     if(o.deliveredLocation==="At Office")m.office++;
     if(o.deliveredLocation==="At Production")m.production++;
   });
+  // Add advance payments into the month of creation
+  orders.forEach(o=>{
+    if(!o.advance||!o.created) return;
+    const p=parseLocaleDate(o.created);
+    if(!p) return;
+    if(!monthMap[p.monthKey]) return; // only track advances for months that have deliveries
+    if(o.advPayMethod==="Cash"||!o.advPayMethod) monthMap[p.monthKey].advCash+=Number(o.advance)||0;
+    if(o.advPayMethod==="UPI") monthMap[p.monthKey].advUPI+=Number(o.advance)||0;
+  });
   const months=Object.entries(monthMap).sort((a,b)=>b[0].localeCompare(a[0]));
 
-  // ── CUSTOMERS TAB ──
+  // Month-over-month trend for placed orders
+  const placedMonths=Object.entries(placedMonthMap).sort((a,b)=>b[0].localeCompare(a[0]));
+  const thisMPlaced=placedMonths[0]?placedMonths[0][1]:{count:0,value:0};
+  const lastMPlaced=placedMonths[1]?placedMonths[1][1]:{count:0,value:0};
+  const trendPct=lastMPlaced.count>0?Math.round(((thisMPlaced.count-lastMPlaced.count)/lastMPlaced.count)*100):null;
   const custFiltered=[...new Set(orders.map(o=>o.mobile))]
     .map(mob=>orders.filter(o=>o.mobile===mob))
     .filter(co=>!custQ||co[0].customer.toLowerCase().includes(custQ.toLowerCase().trim()));
@@ -1448,13 +1616,26 @@ function Reports({orders}){
           {/* Cash Tally Check */}
           <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Cash Tally Check</div>
           <div className="card" style={{marginBottom:18}}>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:tallyEntered?14:0}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:14,marginBottom:14}}>
               <div>
-                <div style={{fontSize:10.5,color:"#bbb",marginBottom:3}}>System Cash Sales (calculated)</div>
-                <div style={{fontSize:20,fontWeight:700,color:"#1a1a1a"}}>{fmtM(cashTotal)}</div>
+                <div style={{fontSize:10.5,color:"#bbb",marginBottom:6}}>System Cash (calculated)</div>
+                <div style={{fontSize:20,fontWeight:700,color:"#1a1a1a"}}>{fmtM(totalCashInHand)}</div>
+                <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:4}}>
+                  <div style={{fontSize:11.5,color:"#555"}}>
+                    <span style={{color:"#bbb"}}>Final payments: </span>
+                    <b>{fmtM(cashTotal)}</b>
+                    <span style={{color:"#bbb",fontSize:10.5}}> ({cashOrders.length} orders)</span>
+                  </div>
+                  {dayAdvCash>0&&<div style={{fontSize:11.5,color:"#555"}}>
+                    <span style={{color:"#bbb"}}>Advances received: </span>
+                    <b>{fmtM(dayAdvCash)}</b>
+                    <span style={{color:"#bbb",fontSize:10.5}}> ({dayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash").length} orders)</span>
+                  </div>}
+                  {dayAdvUPI>0&&<div style={{fontSize:11,color:"#185fa5"}}>+ UPI advances: {fmtM(dayAdvUPI)}</div>}
+                </div>
               </div>
               <div>
-                <label style={LBL}>Physical Cash Counted (₹)</label>
+                <label style={{fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBottom:4}}>Physical Cash Counted (₹)</label>
                 <input type="number" className="inp" value={cashTally} onChange={e=>saveCashTally(e.target.value)} placeholder="Enter actual cash in drawer"/>
               </div>
             </div>
@@ -1465,7 +1646,7 @@ function Reports({orders}){
                   </div>
                 :<div style={{padding:"10px 14px",background:diff>0?"#fff3e0":"#fff0f0",border:`1.5px solid ${diff>0?"#ffb74d":"#ffcccc"}`,borderRadius:10,color:diff>0?"#a35a00":"#cc0000",fontWeight:700,fontSize:13,textAlign:"center"}}>
                     <i className="ti ti-alert-triangle" style={{marginRight:6}}/>
-                    {diff>0?`Surplus of ${fmtM(diff)} — drawer has more cash than expected`:`Shortage of ${fmtM(Math.abs(diff))} — drawer is short`}
+                    {diff>0?`Surplus of ${fmtM(diff)} — drawer has more cash than expected`:`Shortage of ${fmtM(Math.abs(diff))} — drawer is short by ${fmtM(Math.abs(diff))}`}
                   </div>
             )}
           </div>
@@ -1476,6 +1657,25 @@ function Reports({orders}){
 
       {tab==="monthly"&&(
         <div>
+          {/* Orders Placed Trend */}
+          <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Orders Placed — Month over Month</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:12,marginBottom:18}}>
+            {placedMonths.slice(0,3).map(([key,m],i)=>(
+              <div key={key} className="card" style={{padding:"14px 16px",border:i===0?"2px solid #cc0000":"1px solid #eeebe6"}}>
+                <div style={{fontSize:10.5,color:i===0?"#cc0000":"#bbb",fontWeight:600,marginBottom:5}}>{m.label}{i===0?" (current)":""}</div>
+                <div style={{fontSize:24,fontWeight:700,color:"#1a1a1a"}}>{m.count}</div>
+                <div style={{fontSize:11.5,color:"#777",marginTop:2}}>orders placed</div>
+                <div style={{fontSize:12,color:"#1d9e75",fontWeight:600}}>{fmtM(m.value)} value</div>
+              </div>
+            ))}
+            {trendPct!==null&&<div className="card" style={{padding:"14px 16px",display:"flex",flexDirection:"column",justifyContent:"center",alignItems:"center"}}>
+              <div style={{fontSize:28,fontWeight:900,color:trendPct>=0?"#1d9e75":"#cc0000"}}>{trendPct>=0?"+":""}{trendPct}%</div>
+              <div style={{fontSize:11,color:"#bbb",textAlign:"center",marginTop:4}}>vs last month</div>
+            </div>}
+          </div>
+
+          {/* Monthly Revenue breakdown */}
+          <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Monthly Revenue (Delivered Orders)</div>
           {months.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No delivered orders yet</div>}
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
             {months.map(([key,m])=>(
@@ -1484,20 +1684,29 @@ function Reports({orders}){
                   <div style={{fontWeight:700,fontSize:16}}>{m.label}</div>
                   <div style={{fontSize:22,fontWeight:900,color:"#1d9e75"}}>{fmtM(m.revenue)}</div>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10}}>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:12}}>
                   {[
-                    ["Orders Delivered",m.orders.length,"#185fa5"],
-                    ["Cash",`${m.cashCount} · ${fmtM(m.cashTotal)}`,"#1d9e75"],
-                    ["UPI",`${m.upiCount} · ${fmtM(m.upiTotal)}`,"#185fa5"],
-                    ["At Office",m.office,"#0f6e56"],
-                    ["At Production",m.production,"#854f0b"],
-                  ].map(([l,v,c])=>(
+                    ["Orders Delivered",m.orders.length,"#185fa5","ti-circle-check"],
+                    ["Cash (Final)",`${m.cashCount} · ${fmtM(m.cashTotal)}`,"#1d9e75","ti-cash"],
+                    ["UPI (Final)",`${m.upiCount} · ${fmtM(m.upiTotal)}`,"#185fa5","ti-qrcode"],
+                    ["At Office",m.office,"#0f6e56","ti-building-store"],
+                    ["At Production",m.production,"#854f0b","ti-tool"],
+                  ].map(([l,v,c,icon])=>(
                     <div key={l} style={{background:"#fafaf8",borderRadius:10,padding:"10px 12px"}}>
-                      <div style={{fontSize:10,color:"#bbb",marginBottom:3}}>{l}</div>
-                      <div style={{fontWeight:700,fontSize:14,color:c}}>{v}</div>
+                      <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}><i className={`ti ${icon}`} style={{color:c,fontSize:12}}/><div style={{fontSize:10,color:"#bbb"}}>{l}</div></div>
+                      <div style={{fontWeight:700,fontSize:13,color:c}}>{v}</div>
                     </div>
                   ))}
                 </div>
+                {/* Advance cash collected this month */}
+                {(m.advCash>0||m.advUPI>0)&&<div style={{background:"#fafaf8",borderRadius:10,padding:"10px 14px",fontSize:12}}>
+                  <div style={{fontWeight:600,color:"#888",marginBottom:6,fontSize:11,textTransform:"uppercase",letterSpacing:.3}}>Advance Payments Received</div>
+                  <div style={{display:"flex",gap:16,flexWrap:"wrap"}}>
+                    {m.advCash>0&&<div><span style={{color:"#bbb"}}>Cash Advance: </span><b style={{color:"#1d9e75"}}>{fmtM(m.advCash)}</b></div>}
+                    {m.advUPI>0&&<div><span style={{color:"#bbb"}}>UPI Advance: </span><b style={{color:"#185fa5"}}>{fmtM(m.advUPI)}</b></div>}
+                    <div><span style={{color:"#bbb"}}>Total: </span><b>{fmtM(m.advCash+m.advUPI)}</b></div>
+                  </div>
+                </div>}
               </div>
             ))}
           </div>
