@@ -49,7 +49,7 @@ else window.db=null;
 </script>
 
 <script type="text/babel">
-const {useState,useRef,useEffect,useCallback}=React;
+const {useState,useRef,useEffect,useCallback,useMemo}=React;
 
 const USERS=[
   {id:1,name:"Admin User",username:"admin",password:"meet2007",role:"Admin"},
@@ -624,6 +624,41 @@ function NewOrder({user,onAdd,toast2,orders,goto}){
 
   const clearDraft=()=>{try{localStorage.removeItem(DRAFT_KEY);}catch(e){}};
 
+  const [custSuggestions,setCustSuggestions]=useState([]);
+  const [showSugg,setShowSugg]=useState(false);
+
+  // Build unique customers list from orders
+  const knownCustomers=useMemo(()=>{
+    const seen={};
+    orders.forEach(o=>{if(o.customer&&o.mobile)seen[o.mobile]={name:o.customer,mobile:o.mobile,count:orders.filter(x=>x.mobile===o.mobile).length};});
+    return Object.values(seen);
+  },[orders]);
+
+  const onCustomerChange=v=>{
+    setCustomer(v);
+    if(v.trim().length>=1){
+      const q=v.toLowerCase();
+      const matches=knownCustomers.filter(c=>c.name.toLowerCase().includes(q)).slice(0,5);
+      setCustSuggestions(matches);
+      setShowSugg(matches.length>0);
+    } else {
+      setShowSugg(false);
+    }
+  };
+
+  const pickCustomer=c=>{
+    setCustomer(c.name);
+    setMobile(c.mobile);
+    setShowSugg(false);
+    // Show their previous orders count
+    toast2(`${c.name} — ${c.count} previous order${c.count===1?"":"s"} on record`);
+  };
+
+  // Previous orders for this customer (by name match)
+  const prevOrders=customer.trim().length>=2
+    ?orders.filter(o=>o.customer.toLowerCase().includes(customer.toLowerCase().trim())).slice(0,3)
+    :[];
+
   const updItem=(i,k,v)=>setItems(p=>{
     const n=[...p];n[i]={...n[i],[k]:v};
     if(k==="advance"||k==="total")n[i].pending=Math.max(0,Number(n[i].total||0)-Number(n[i].advance||0));
@@ -729,7 +764,36 @@ function NewOrder({user,onAdd,toast2,orders,goto}){
           <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:16}}>
             <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:10,textTransform:"uppercase",letterSpacing:.5}}>Customer Details</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:13}}>
-              <div><label style={LBL}>Customer Name *</label><input ref={setRef("customer")} onKeyDown={onEnter("customer")} className="inp" value={customer} onChange={e=>setCustomer(e.target.value)} placeholder="Full name"/></div>
+              <div style={{position:"relative"}}>
+                <label style={LBL}>Customer Name *</label>
+                <input
+                  ref={setRef("customer")}
+                  onKeyDown={onEnter("customer")}
+                  className="inp"
+                  value={customer}
+                  onChange={e=>onCustomerChange(e.target.value)}
+                  onBlur={()=>setTimeout(()=>setShowSugg(false),150)}
+                  onFocus={()=>{if(custSuggestions.length>0)setShowSugg(true);}}
+                  placeholder="Full name"
+                  autoComplete="off"
+                />
+                {/* Suggestions dropdown */}
+                {showSugg&&(
+                  <div style={{position:"absolute",top:"100%",left:0,right:0,zIndex:50,background:"#fff",border:"1.5px solid #e0ddd8",borderRadius:10,boxShadow:"0 4px 16px rgba(0,0,0,.1)",overflow:"hidden",marginTop:4}}>
+                    {custSuggestions.map(c=>(
+                      <div key={c.mobile} onMouseDown={()=>pickCustomer(c)} style={{padding:"10px 14px",cursor:"pointer",display:"flex",justifyContent:"space-between",alignItems:"center",borderBottom:"1px solid #f5f5f3"}}
+                        onMouseEnter={e=>e.currentTarget.style.background="#fafaf8"}
+                        onMouseLeave={e=>e.currentTarget.style.background="#fff"}>
+                        <div>
+                          <div style={{fontWeight:600,fontSize:13}}>{c.name}</div>
+                          <div style={{fontSize:11,color:"#bbb"}}>{c.mobile}</div>
+                        </div>
+                        <div style={{fontSize:11,color:"#cc0000",fontWeight:600}}>{c.count} order{c.count===1?"":"s"}</div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
               <div><label style={LBL}>Mobile Number *</label>
                 <div style={{display:"flex",gap:8}}>
                   <input ref={setRef("mobile")} onKeyDown={onEnter("mobile")} className="inp" value={mobile} onChange={e=>setMobile(e.target.value)} placeholder="10-digit mobile" style={{flex:1}}/>
@@ -748,7 +812,31 @@ function NewOrder({user,onAdd,toast2,orders,goto}){
             </div>
           </div>
 
-          {/* ── Order items ── */}
+          {/* ── Previous orders for this customer ── */}
+          {prevOrders.length>0&&(
+            <div style={{background:"#fff8f8",border:"1px solid #ffdddd",borderRadius:10,padding:"10px 14px",marginBottom:16}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#cc0000",marginBottom:8,textTransform:"uppercase",letterSpacing:.4}}>
+                <i className="ti ti-history" style={{marginRight:5}}/>Previous Orders ({orders.filter(o=>o.customer.toLowerCase().includes(customer.toLowerCase().trim())).length} total)
+              </div>
+              <div style={{display:"flex",flexDirection:"column",gap:6}}>
+                {prevOrders.map(o=>(
+                  <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,flexWrap:"wrap",gap:4}}>
+                    <div style={{display:"flex",alignItems:"center",gap:8}}>
+                      {o.orderNum&&<span style={{fontWeight:700,color:"#cc0000",minWidth:32}}>{fmtON(o.orderNum)}</span>}
+                      <span style={{color:"#555"}}>{o.product} · {o.wood} · {o.size}</span>
+                    </div>
+                    <div style={{display:"flex",alignItems:"center",gap:10}}>
+                      <span style={{color:"#bbb"}}>{o.created?o.created.split(",")[0]:"—"}</span>
+                      <StatusBadge s={o.status}/>
+                    </div>
+                  </div>
+                ))}
+                {orders.filter(o=>o.customer.toLowerCase().includes(customer.toLowerCase().trim())).length>3&&(
+                  <div style={{fontSize:11,color:"#bbb",marginTop:2}}>+ {orders.filter(o=>o.customer.toLowerCase().includes(customer.toLowerCase().trim())).length-3} more orders</div>
+                )}
+              </div>
+            </div>
+          )}
           <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:14}}>
             {items.map((it,i)=>(
               <div key={i} style={{border:"1.5px solid #eeebe6",borderRadius:13,padding:14,position:"relative"}}>
@@ -1165,14 +1253,101 @@ function Factory({orders,delOrder,updOrder,user,onAdd,toast2,goto}){
     </div>
   );
 
+  // ── Scan-to-Dispatch inline state ──
+  const [showScanDispatch,setShowScanDispatch]=useState(false);
+  const [scanResult,setScanResult]=useState(null); // the matched order after scan
+
+  const onScanDispatch=useCallback(text=>{
+    const id=text.trim();
+    const o=orders.find(x=>x.id===id);
+    if(!o){toast2("QR scanned but order not found","err");return;}
+    if(o.status!==S.PROD){
+      if(o.status===S.PEND) toast2("Order not yet accepted by factory","err");
+      else if(o.status===S.TRANSIT) toast2("Already dispatched","err");
+      else toast2("Order is not in production","err");
+      return;
+    }
+    setScanResult(o);
+    toast2("Order found: "+(o.orderNum?fmtON(o.orderNum):o.id));
+  },[orders,toast2]);
+
+  const doScanDispatch=()=>{
+    if(!scanResult) return;
+    updOrder(scanResult.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name});
+    toast2("Order "+( scanResult.orderNum?fmtON(scanResult.orderNum):scanResult.id)+" marked In Transit!");
+    setScanResult(null);
+    setShowScanDispatch(false);
+  };
+
   return(
     <div>
       {delTarget&&<DeleteConfirm order={delTarget} onCancel={()=>setDelTarget(null)} onConfirm={()=>{delOrder(delTarget.id);setDelTarget(null);}}/>}
       {dispatchTarget&&<DispatchModal order={dispatchTarget} toast2={toast2} onCancel={()=>setDispatchTarget(null)} onConfirm={()=>confirmDispatch(dispatchTarget)}/>}
-      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:10}}>
+
+      {/* ── Top action bar ── */}
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
         <div style={{fontSize:13,color:"#999"}}>{active.length} active orders in factory</div>
-        <button className="btn btn-red" onClick={()=>setShowNewOrder(true)}><i className="ti ti-plus"/>Add New Order</button>
+        <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button className="btn" style={{background:"#6a1bb5",color:"#fff"}} onClick={()=>{setShowScanDispatch(p=>!p);setScanResult(null);}}>
+            <i className="ti ti-qrcode"/>Scan to Dispatch
+          </button>
+          <button className="btn btn-red" onClick={()=>setShowNewOrder(true)}>
+            <i className="ti ti-plus"/>Add New Order
+          </button>
+        </div>
       </div>
+
+      {/* ── Inline Scan-to-Dispatch panel ── */}
+      {showScanDispatch&&(
+        <div className="card" style={{marginBottom:18,border:"2px solid #6a1bb5"}}>
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontWeight:700,fontSize:15,color:"#6a1bb5"}}><i className="ti ti-qrcode" style={{marginRight:6}}/>Scan to Dispatch</div>
+            <button onClick={()=>{setShowScanDispatch(false);setScanResult(null);}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
+          </div>
+
+          {!scanResult?(
+            <>
+              <div style={{fontSize:12.5,color:"#777",marginBottom:12}}>
+                Point the camera at any <b>In Production</b> order's QR code — it will be detected automatically.
+              </div>
+              <QRScanner onResult={onScanDispatch} onError={()=>toast2("Camera error","err")}/>
+            </>
+          ):(
+            <>
+              {/* ── Matched order card ── */}
+              <div style={{background:"#f4eeff",border:"1.5px solid #c9a3f5",borderRadius:12,padding:14,marginBottom:14}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+                  <div>
+                    {scanResult.orderNum&&<div style={{fontSize:20,fontWeight:900,color:"#6a1bb5",marginBottom:2}}>Order {fmtON(scanResult.orderNum)}</div>}
+                    <div style={{fontSize:11,color:"#999",marginBottom:4}}>{scanResult.id}</div>
+                    <div style={{fontWeight:700,fontSize:15}}>{scanResult.customer}</div>
+                    <div style={{fontSize:12,color:"#777"}}>{scanResult.mobile}</div>
+                  </div>
+                  <StatusBadge s={scanResult.status}/>
+                </div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:12}}>
+                  {[["Product",scanResult.product],["Wood",scanResult.wood],["Size",scanResult.size],["Qty",scanResult.qty],["Delivery",fmtD(scanResult.delivery)]].map(([k,v])=>(
+                    <div key={k} style={{background:"#fff",borderRadius:8,padding:"8px 10px"}}>
+                      <div style={{fontSize:10,color:"#bbb",marginBottom:2}}>{k}</div>
+                      <div style={{fontWeight:700,fontSize:12.5,color:"#1a1a1a"}}>{v}</div>
+                    </div>
+                  ))}
+                </div>
+                {scanResult.notes&&<div style={{marginTop:10,background:"#fff8f8",borderRadius:8,padding:"8px 10px",fontSize:12,color:"#a35a00"}}>📝 {scanResult.notes}</div>}
+              </div>
+
+              <div style={{display:"flex",gap:10}}>
+                <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={()=>{setScanResult(null);}}>
+                  <i className="ti ti-arrow-back-up"/>Scan Again
+                </button>
+                <button className="btn" style={{flex:2,justifyContent:"center",background:"#6a1bb5",color:"#fff",fontSize:15}} onClick={doScanDispatch}>
+                  <i className="ti ti-truck"/>Confirm Dispatch — Mark In Transit
+                </button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
 
       <Section title="Pending Factory Acceptance" color="#cc0000" list={pendAccept} emptyMsg="Nothing awaiting acceptance"
         renderAction={o=><button className="btn btn-green" style={{padding:"7px 12px",fontSize:12}} onClick={e=>{e.stopPropagation();acceptOrder(o);}}><i className="ti ti-check"/>Accept</button>}/>
@@ -1444,6 +1619,100 @@ function parseLocaleDate(str){
   return {d,m,y,dateKey:`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`,monthKey:`${y}-${String(m).padStart(2,"0")}`,monthLabel:new Date(y,m-1,1).toLocaleDateString("en-IN",{month:"long",year:"numeric"})};
 }
 const todayKey=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
+
+// ── CUSTOMER TAB (used inside Reports) ──
+function CustomerTab({orders,custQ,setCustQ}){
+  const [expanded,setExpanded]=useState(null); // mobile key of expanded customer
+
+  const allCustomers=useMemo(()=>{
+    const seen={};
+    orders.forEach(o=>{
+      if(!o.mobile) return;
+      if(!seen[o.mobile]) seen[o.mobile]=[];
+      seen[o.mobile].push(o);
+    });
+    return Object.entries(seen)
+      .map(([mob,cos])=>({mobile:mob,name:cos[0].customer,orders:cos.sort((a,b)=>(b.created||"").localeCompare(a.created||""))}))
+      .sort((a,b)=>a.name.localeCompare(b.name));
+  },[orders]);
+
+  const filtered=custQ.trim()
+    ?allCustomers.filter(c=>c.name.toLowerCase().includes(custQ.toLowerCase().trim()))
+    :allCustomers;
+
+  const statusColor={[S.PEND]:"#cc0000",[S.PROD]:"#854f0b",[S.TRANSIT]:"#6a1bb5",[S.RECV]:"#0f6e56",[S.DELI]:"#185fa5"};
+
+  return(
+    <div>
+      <div style={{marginBottom:14,position:"relative"}}>
+        <i className="ti ti-search" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#bbb",fontSize:14}}/>
+        <input className="inp" style={{paddingLeft:36}} value={custQ} onChange={e=>{setCustQ(e.target.value);setExpanded(null);}} placeholder="Search customer by name..."/>
+      </div>
+
+      {filtered.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No customers found</div>}
+
+      <div style={{display:"flex",flexDirection:"column",gap:8}}>
+        {filtered.map(c=>{
+          const isOpen=expanded===c.mobile;
+          const totalVal=c.orders.reduce((a,o)=>a+Number(o.total),0);
+          const pendingVal=c.orders.filter(o=>o.status!==S.DELI).reduce((a,o)=>a+Number(o.pending),0);
+          return(
+            <div key={c.mobile} className="card" style={{padding:0,overflow:"hidden",border:isOpen?"1.5px solid #cc0000":"1px solid #eeebe6",transition:"border .15s"}}>
+              {/* ── Customer header row — always visible ── */}
+              <div
+                onClick={()=>setExpanded(isOpen?null:c.mobile)}
+                style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"13px 16px",cursor:"pointer",flexWrap:"wrap",gap:8}}
+              >
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{width:38,height:38,borderRadius:"50%",background:"#fff3f3",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    <span style={{fontWeight:700,color:"#cc0000",fontSize:14}}>{c.name[0].toUpperCase()}</span>
+                  </div>
+                  <div>
+                    <div style={{fontWeight:700,fontSize:14}}>{c.name}</div>
+                    <div style={{fontSize:11.5,color:"#bbb"}}>{c.mobile} · {c.orders.length} order{c.orders.length===1?"":"s"}</div>
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:12}}>
+                  <div style={{textAlign:"right"}}>
+                    <div style={{fontWeight:700,fontSize:13,color:"#1d9e75"}}>{fmtM(totalVal)}</div>
+                    {pendingVal>0&&<div style={{fontSize:11,color:"#cc0000"}}>Due: {fmtM(pendingVal)}</div>}
+                  </div>
+                  <i className={`ti ${isOpen?"ti-chevron-up":"ti-chevron-down"}`} style={{color:"#bbb",fontSize:16}}/>
+                </div>
+              </div>
+
+              {/* ── Expanded order history ── */}
+              {isOpen&&(
+                <div style={{borderTop:"1px solid #f5f2ee",padding:"8px 16px 14px"}}>
+                  <div style={{display:"flex",flexDirection:"column",gap:0}}>
+                    {c.orders.map((o,i)=>(
+                      <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<c.orders.length-1?"1px solid #f5f2ee":"none",flexWrap:"wrap",gap:6}}>
+                        <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
+                          {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:13,flexShrink:0}}>{fmtON(o.orderNum)}</span>}
+                          <div style={{minWidth:0}}>
+                            <div style={{fontSize:12.5,fontWeight:600,color:"#333",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.product} · {o.wood} · {o.size}</div>
+                            <div style={{fontSize:11,color:"#bbb"}}>{o.created?o.created.split(",")[0]:"—"}{o.qty?` · Qty ${o.qty}`:""}</div>
+                          </div>
+                        </div>
+                        <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
+                          <div style={{textAlign:"right"}}>
+                            <div style={{fontSize:12.5,fontWeight:700}}>{fmtM(o.total)}</div>
+                            {o.pending>0&&<div style={{fontSize:11,color:"#cc0000"}}>Due {fmtM(o.pending)}</div>}
+                          </div>
+                          <span style={{fontSize:10.5,fontWeight:600,padding:"2px 8px",borderRadius:20,background:(statusColor[o.status]||"#888")+"18",color:statusColor[o.status]||"#888",whiteSpace:"nowrap"}}>{o.status}</span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
 
 // ── REPORTS ──
 function Reports({orders}){
@@ -1725,24 +1994,7 @@ function Reports({orders}){
       {tab==="delivered"&&<Table rows={deli} cols={["orderNum","id","customer","product","wood","qty","total","payMethod","deliveredLocation","deliveredAt"]}/>}
 
       {tab==="customers"&&(
-        <div>
-          <div style={{marginBottom:16,position:"relative"}}>
-            <i className="ti ti-search" style={{position:"absolute",left:12,top:"50%",transform:"translateY(-50%)",color:"#bbb",fontSize:14}}/>
-            <input className="inp" style={{paddingLeft:36}} value={custQ} onChange={e=>setCustQ(e.target.value)} placeholder="Search customer by name..."/>
-          </div>
-          <div style={{display:"flex",flexDirection:"column",gap:9}}>
-            {custFiltered.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No customers found</div>}
-            {custFiltered.map(co=>{
-              const c=co[0];
-              return(
-                <div key={c.mobile} className="card" style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,padding:"13px 16px"}}>
-                  <div><div style={{fontWeight:700,fontSize:14}}>{c.customer}</div><div style={{fontSize:12,color:"#999"}}>{c.mobile}</div></div>
-                  <div style={{textAlign:"right"}}><div style={{fontWeight:700}}>{co.length} orders</div><div style={{fontSize:12,color:"#1d9e75",fontWeight:600}}>{fmtM(co.reduce((a,o)=>a+o.total,0))} total</div></div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+        <CustomerTab orders={orders} custQ={custQ} setCustQ={setCustQ}/>
       )}
     </div>
   );
