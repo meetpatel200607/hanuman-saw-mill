@@ -68,9 +68,9 @@ const {useState,useRef,useEffect,useCallback}=React;
 
 // ── DATA ──
 const USERS=[
-  {id:1,name:"Admin User",username:"admin",password:"admin123",role:"Admin"},
-  {id:2,name:"Ravi Kumar",username:"office",password:"office123",role:"Office Staff"},
-  {id:3,name:"Suresh Factory",username:"factory",password:"factory123",role:"Factory Staff"},
+  {id:1,name:"Admin User",username:"admin",password:"meet2007",role:"Admin"},
+  {id:2,name:"Ravi Kumar",username:"office",password:"jignesh2026",role:"Office Staff"},
+  {id:3,name:"Suresh Factory",username:"factory",password:"arvind2026",role:"Factory Staff"},
   {id:4,name:"Accounts User",username:"accounts",password:"acc123",role:"Accountant"},
 ];
 const WOODS=["Teak","Sal","Pine","Eucalyptus","Mango","Neem","Sagwan","Deodar","Rosewood","Bamboo"];
@@ -412,7 +412,7 @@ function App(){
         )}
 
         {!dbMode&&(
-          <div style={{background:"#fffbea",borderBottom:"1px solid #ffe58f",padding:"8px 20px",fontSize:12,color:"#7a5c00",display:"flex",alignItems:"center",gap:8"}}>
+          <div style={{background:"#fffbea",borderBottom:"1px solid #ffe58f",padding:"8px 20px",fontSize:12,color:"#7a5c00",display:"flex",alignItems:"center",gap:8}}>
             <i className="ti ti-alert-triangle" style={{fontSize:14}}/>
             Running in local mode — Firebase not configured. Orders are not shared across devices.
           </div>
