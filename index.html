@@ -1183,9 +1183,25 @@ function Factory({orders,delOrder,updOrder,user,onAdd,toast2,goto}){
   const [delTarget,setDelTarget]=useState(null);
   const [dispatchTarget,setDispatchTarget]=useState(null);
   const [showNewOrder,setShowNewOrder]=useState(false);
+  const [showScanDispatch,setShowScanDispatch]=useState(false);
+  const [scanResult,setScanResult]=useState(null); // the matched order after scan
 
   const acceptOrder=o=>{updOrder(o.id,{status:S.PROD,acceptedAt:now2(),acceptedBy:user.name});toast2("Order accepted — now In Production");setSel(null);};
   const confirmDispatch=o=>{updOrder(o.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name});toast2("Order marked In Transit!");setDispatchTarget(null);setSel(null);};
+
+  const onScanDispatch=useCallback(text=>{
+    const id=text.trim();
+    const o=orders.find(x=>x.id===id);
+    if(!o){toast2("QR scanned but order not found","err");return;}
+    if(o.status!==S.PROD){
+      if(o.status===S.PEND) toast2("Order not yet accepted by factory","err");
+      else if(o.status===S.TRANSIT) toast2("Already dispatched","err");
+      else toast2("Order is not in production","err");
+      return;
+    }
+    setScanResult(o);
+    toast2("Order found: "+(o.orderNum?fmtON(o.orderNum):o.id));
+  },[orders,toast2]);
 
   if(showNewOrder) return(
     <div>
@@ -1252,24 +1268,6 @@ function Factory({orders,delOrder,updOrder,user,onAdd,toast2,goto}){
       </div>
     </div>
   );
-
-  // ── Scan-to-Dispatch inline state ──
-  const [showScanDispatch,setShowScanDispatch]=useState(false);
-  const [scanResult,setScanResult]=useState(null); // the matched order after scan
-
-  const onScanDispatch=useCallback(text=>{
-    const id=text.trim();
-    const o=orders.find(x=>x.id===id);
-    if(!o){toast2("QR scanned but order not found","err");return;}
-    if(o.status!==S.PROD){
-      if(o.status===S.PEND) toast2("Order not yet accepted by factory","err");
-      else if(o.status===S.TRANSIT) toast2("Already dispatched","err");
-      else toast2("Order is not in production","err");
-      return;
-    }
-    setScanResult(o);
-    toast2("Order found: "+(o.orderNum?fmtON(o.orderNum):o.id));
-  },[orders,toast2]);
 
   const doScanDispatch=()=>{
     if(!scanResult) return;
