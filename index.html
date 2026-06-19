@@ -64,7 +64,7 @@ const S={PEND:"Pending Factory Acceptance",PROD:"In Production",TRANSIT:"In Tran
 const DELIVERY_LOCATIONS=["At Office","At Production"];
 
 // ── Configurable Google Review link — update this with your actual Google Business review URL ──
-const GOOGLE_REVIEW_URL="https://share.google/sSfLPa63lWPZmwBPm";
+const GOOGLE_REVIEW_URL="https://g.page/r/CRzfP2n119hWEBM/review";
 const HSM_WHATSAPP_NUMBER="917030191916";
 
 const genId=()=>"HSM-"+Math.random().toString(36).toUpperCase().slice(2,8);
@@ -566,19 +566,21 @@ function sendWhatsApp(orders_created){
   const pendAmt=orders_created.reduce((a,x)=>a+x.pending,0);
 
   const msg=
-`Hello *${o.customer}*! Your order has been placed.
+`🪵 *Hanuman Saw Mill — Order Confirmation*
+
+Hello *${o.customer}*! Your order has been placed.
 
 📋 *Order No:* ${o.orderNum?fmtON(o.orderNum):"—"}
-
 📦 *Items:*
 ${itemLines}
 
-*Total:* ₹${totalAmt.toLocaleString("en-IN")}
-*Advance Paid:* ₹${advAmt.toLocaleString("en-IN")}
-*Pending:* ₹${pendAmt.toLocaleString("en-IN")}
-*Delivery Date:* ${o.delivery?fmtD(o.delivery):"—"}
+ *Total:* ₹${totalAmt.toLocaleString("en-IN")}
+ *Advance Paid:* ₹${advAmt.toLocaleString("en-IN")}
+ *Pending:* ₹${pendAmt.toLocaleString("en-IN")}
+ *Delivery Date:* ${o.delivery?fmtD(o.delivery):"—"}
 
-Thank you for your order! 🙏`;
+Thank you for your order! 🙏
+— Hanuman Saw Mill`;
 
   const url="https://wa.me/91"+num+"?text="+encodeURIComponent(msg);
   window.open(url,"_blank");
@@ -590,21 +592,20 @@ function sendFeedbackRequest(order){
   const msg=
 `*Hanuman Saw Mill*
 
-Hello *${order.customer}*, thank you for your order.
+Dear *${order.customer}*,
 
-Please rate your experience:
-⭐⭐⭐⭐⭐ Excellent
-⭐⭐⭐⭐ Good
-⭐⭐⭐ Average
-⭐⭐ Needs Improvement
-⭐ Poor
+Thank you for choosing us.
 
-Please reply with your rating from 1 to 5.
+If you are satisfied with our product and service, we would be grateful if you could take a moment to share your experience.
 
-If you are happy with our service, we would greatly appreciate a Google Review.
+⭐ *Write a Google Review:*
+${GOOGLE_REVIEW_URL}
 
-*Google Review:*
-${GOOGLE_REVIEW_URL}`;
+Your review helps local businesses like ours grow and serve customers better.
+
+Thank you for your support.
+
+— Hanuman Saw Mill`;
 
   const url="https://wa.me/91"+num+"?text="+encodeURIComponent(msg);
   window.open(url,"_blank");
