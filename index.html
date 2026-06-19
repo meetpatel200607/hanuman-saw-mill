@@ -63,6 +63,9 @@ const PAY_M=["Cash","UPI","Bank Transfer"];
 const S={PEND:"Pending Factory Acceptance",PROD:"In Production",TRANSIT:"In Transit",RECV:"Received at Office",DELI:"Delivered & Paid"};
 const DELIVERY_LOCATIONS=["At Office","At Production"];
 
+// ── Configurable Google Review link — update this with your actual Google Business review URL ──
+const GOOGLE_REVIEW_URL="https://g.page/r/PASTE_YOUR_GOOGLE_REVIEW_LINK/review";
+
 const genId=()=>"HSM-"+Math.random().toString(36).toUpperCase().slice(2,8);
 const now2=()=>new Date().toLocaleString("en-IN");
 const fmtM=n=>"₹"+Number(n||0).toLocaleString("en-IN");
@@ -70,9 +73,9 @@ const fmtD=d=>d?new Date(d).toLocaleDateString("en-IN"):"—";
 const fmtON=n=>n?"#"+String(n).padStart(3,"0"):"—";
 
 const SEED=[
-  {id:"HSM-DEMO1",orderNum:1,customer:"Ramesh Sharma",mobile:"9876543210",product:"Umbra Patti",wood:"Khair",size:'2"x4"x10',qty:50,advance:5000,pending:7500,total:12500,delivery:"2026-05-20",notes:"Smooth finish",status:S.PEND,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"Cash",payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:""},
-  {id:"HSM-DEMO2",orderNum:2,customer:"Priya Patel",mobile:"9988776655",product:"Door Frame",wood:"Sisam",size:'4"x3"x7',qty:10,advance:2000,pending:3000,total:5000,delivery:"2026-05-15",notes:"",status:S.RECV,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"Cash",payMethod:"",payAt:"",receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:"",deliveredBy:"",deliveredLocation:"",acceptedAt:now2(),acceptedBy:"Suresh Factory",dispatchedAt:now2(),dispatchedBy:"Suresh Factory"},
-  {id:"HSM-DEMO3",orderNum:3,customer:"Deepak Verma",mobile:"9123456789",product:"Plank",wood:"Pine",size:'1"x6"x12',qty:100,advance:8000,pending:0,total:8000,delivery:"2026-05-10",notes:"",status:S.DELI,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"UPI",payMethod:"UPI",payAt:now2(),receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:now2(),deliveredBy:"Ravi Kumar",deliveredLocation:"At Office",acceptedAt:now2(),acceptedBy:"Suresh Factory",dispatchedAt:now2(),dispatchedBy:"Suresh Factory"},
+  {id:"HSM-DEMO1",orderNum:1,customer:"Ramesh Sharma",mobile:"9876543210",product:"Umbra Patti",wood:"Khair",size:'2"x4"x10',qty:50,advance:5000,pending:7500,total:12500,delivery:"2026-05-20",notes:"Smooth finish",status:S.PEND,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"Cash",payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:""},
+  {id:"HSM-DEMO2",orderNum:2,customer:"Priya Patel",mobile:"9988776655",product:"Door Frame",wood:"Sisam",size:'4"x3"x7',qty:10,advance:2000,pending:3000,total:5000,delivery:"2026-05-15",notes:"",status:S.RECV,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"Cash",payMethod:"",payAt:"",receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:"",deliveredBy:"",deliveredLocation:"",acceptedAt:now2(),acceptedBy:"Suresh Factory",dispatchedAt:now2(),dispatchedBy:"Suresh Factory",feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:""},
+  {id:"HSM-DEMO3",orderNum:3,customer:"Deepak Verma",mobile:"9123456789",product:"Plank",wood:"Pine",size:'1"x6"x12',qty:100,advance:8000,pending:0,total:8000,delivery:"2026-05-10",notes:"",status:S.DELI,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"UPI",payMethod:"UPI",payAt:now2(),receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:now2(),deliveredBy:"Ravi Kumar",deliveredLocation:"At Office",acceptedAt:now2(),acceptedBy:"Suresh Factory",dispatchedAt:now2(),dispatchedBy:"Suresh Factory",feedbackSent:true,feedbackSentAt:now2(),customerRating:5,customerReviewText:""},
 ];
 
 // QR encodes ONLY the order ID — short = simple = easy to scan
@@ -550,32 +553,75 @@ function DeleteConfirm({order,onConfirm,onCancel}){
   );
 }
 
-// ── WHATSAPP HELPER ──
+// ── WHATSAPP HELPER — Order Confirmation ──
 function sendWhatsApp(orders_created){
-  // Build one message per customer (group all items)
   const o=orders_created[0];
   const num=o.mobile.replace(/\D/g,"");
-  const itemLines=orders_created.map((it,i)=>
-    `• Item ${i+1}: ${it.product} | ${it.wood} | ${it.size} | Qty: ${it.qty}`
+  const itemLines=orders_created.map(it=>
+    `• ${it.product} | ${it.wood}\n📏 Size: ${it.size}   Qty: ${it.qty}`
   ).join("\n");
+  const totalAmt=orders_created.reduce((a,x)=>a+x.total,0);
+  const advAmt=orders_created.reduce((a,x)=>a+x.advance,0);
+  const pendAmt=orders_created.reduce((a,x)=>a+x.pending,0);
+
   const msg=
-`🪵 *Hanuman Saw Mill — Order Confirmation*
+`*Hanuman Saw Mill*
 
-Hello *${o.customer}*! Your order has been placed.
+Dear ${o.customer},
+Your order has been confirmed.
 
-📋 *Order No:* ${o.orderNum?fmtON(o.orderNum):"—"}
-📦 *Items:*
+Order No: ${o.orderNum?fmtON(o.orderNum):"—"}
 ${itemLines}
 
-💰 *Total:* ${fmtM(orders_created.reduce((a,x)=>a+x.total,0))}
-✅ *Advance Paid:* ${fmtM(orders_created.reduce((a,x)=>a+x.advance,0))}
-🔔 *Pending:* ${fmtM(orders_created.reduce((a,x)=>a+x.pending,0))}
-${o.delivery?"🗓 *Delivery Date:* "+fmtD(o.delivery):""}
+Total: ₹${totalAmt.toLocaleString("en-IN")}   Advance: ₹${advAmt.toLocaleString("en-IN")}   Balance: ₹${pendAmt.toLocaleString("en-IN")}
+${o.delivery?"Delivery Date: "+fmtD(o.delivery):""}
 
-Thank you for your order! 🙏
+Thank you for choosing Hanuman Saw Mill. We will keep you updated on your order status.
 — Hanuman Saw Mill`;
 
   const url="https://wa.me/91"+num+"?text="+encodeURIComponent(msg);
+  window.open(url,"_blank");
+}
+
+// ── WHATSAPP HELPER — Feedback Request (only for Delivered & Paid orders) ──
+function sendFeedbackRequest(order){
+  const num=order.mobile.replace(/\D/g,"");
+  const msg=
+`*Hanuman Saw Mill*
+
+Dear ${order.customer},
+Thank you for your order. We hope you are satisfied with our product and service.
+
+Please rate your experience:
+⭐⭐⭐⭐⭐ Excellent
+⭐⭐⭐⭐ Good
+⭐⭐⭐ Average
+⭐⭐ Needs Improvement
+⭐ Poor
+
+You can simply click a rating below or reply with a number from 1 to 5.
+
+If you are happy with our service, we would greatly appreciate a Google Review.
+${GOOGLE_REVIEW_URL}
+
+Thank you for your support.
+— Hanuman Saw Mill`;
+
+  const url="https://wa.me/91"+num+"?text="+encodeURIComponent(msg);
+  window.open(url,"_blank");
+}
+
+// ── WHATSAPP HELPER — Clickable rating reply (prefilled message from a specific star tap) ──
+const RATING_TEXT={
+  5:"My rating is 5/5. Excellent service.",
+  4:"My rating is 4/5. Good service.",
+  3:"My rating is 3/5.",
+  2:"My rating is 2/5. Needs improvement.",
+  1:"My rating is 1/5. Poor experience.",
+};
+function sendRatingReply(order,stars){
+  const num=order.mobile.replace(/\D/g,"");
+  const url="https://wa.me/91"+num+"?text="+encodeURIComponent(RATING_TEXT[stars]||"");
   window.open(url,"_blank");
 }
 
@@ -707,6 +753,7 @@ function NewOrder({user,onAdd,toast2,orders,goto}){
         status:S.PEND,created:now2(),createdBy:user.name,
         payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",
         acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",
+        feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:"",
       });
     }
     const groupId=created[0].id;
@@ -1084,6 +1131,58 @@ function OrderList({orders,updOrder,delOrder,toast2,user}){
           <button className="btn btn-green" onClick={()=>downloadQR(sel)}><i className="ti ti-download"/>Download QR</button>
           {sel.status===S.DELI&&<button className="btn btn-outline" onClick={()=>printInvoice(sel)}><i className="ti ti-file-invoice"/>Invoice</button>}
         </div>
+
+        {/* ── Feedback section — only for Delivered & Paid orders ── */}
+        {sel.status===S.DELI&&(
+          <div style={{marginTop:18,paddingTop:18,borderTop:"1px solid #f0ede8"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Customer Feedback</div>
+
+            {sel.customerRating?(
+              <div style={{background:"#fafaf8",borderRadius:12,padding:14,textAlign:"center"}}>
+                <div style={{fontSize:22,marginBottom:4}}>{"⭐".repeat(sel.customerRating)}</div>
+                <div style={{fontSize:13,fontWeight:700,color:"#1a1a1a"}}>{sel.customerRating}/5 Rating</div>
+                {sel.customerReviewText&&<div style={{fontSize:12,color:"#777",marginTop:6,fontStyle:"italic"}}>"{sel.customerReviewText}"</div>}
+              </div>
+            ):(
+              <div style={{display:"flex",alignItems:"center",justifyContent:"space-between",flexWrap:"wrap",gap:10}}>
+                <div style={{fontSize:12,color:"#999"}}>
+                  {sel.feedbackSent
+                    ?<><i className="ti ti-check" style={{color:"#1d9e75",marginRight:4}}/>Feedback request sent {sel.feedbackSentAt}</>
+                    :"No feedback requested yet"}
+                </div>
+                <button className="btn" style={{background:"#25D366",color:"#fff",fontWeight:700,fontSize:13}}
+                  onClick={()=>{
+                    sendFeedbackRequest(sel);
+                    updOrder(sel.id,{feedbackSent:true,feedbackSentAt:now2()});
+                    setSel({...sel,feedbackSent:true,feedbackSentAt:now2()});
+                    toast2("Feedback request sent on WhatsApp!");
+                  }}>
+                  <i className="ti ti-brand-whatsapp" style={{fontSize:17}}/>Send Feedback Request
+                </button>
+              </div>
+            )}
+
+            {/* Clickable rating links — opens WhatsApp with a prefilled reply for that rating */}
+            {!sel.customerRating&&sel.feedbackSent&&(
+              <div style={{marginTop:12}}>
+                <div style={{fontSize:11,color:"#bbb",marginBottom:6}}>Quick rating links (or record manually if customer replied by text):</div>
+                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                  {[5,4,3,2,1].map(n=>(
+                    <button key={n} className="btn btn-outline" style={{padding:"7px 11px",fontSize:12.5}}
+                      onClick={()=>{
+                        sendRatingReply(sel,n);
+                        updOrder(sel.id,{customerRating:n});
+                        setSel({...sel,customerRating:n});
+                        toast2(n+"-star rating recorded");
+                      }}>
+                      {"⭐".repeat(n)}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
       </div>
       {delTarget&&<DeleteConfirm order={delTarget} onCancel={()=>setDelTarget(null)} onConfirm={()=>{delOrder(delTarget.id);setDelTarget(null);setSel(null);toast2("Order deleted");}}/>}
     </div>
@@ -1721,7 +1820,8 @@ function Reports({orders}){
 
   const deli=orders.filter(o=>o.status===S.DELI);
   const pend=orders.filter(o=>o.status!==S.DELI&&o.pending>0);
-  const tabs=[["daily","Daily Sales"],["monthly","Monthly Reports"],["pending","Pending"],["delivered","Delivered"],["customers","Customers"]];
+  const rated=orders.filter(o=>o.customerRating);
+  const tabs=[["daily","Daily Sales"],["monthly","Monthly Reports"],["pending","Pending"],["delivered","Delivered"],["customers","Customers"],["feedback","Feedback"]];
   const labels={orderNum:"Order #",id:"Order ID",customer:"Customer",mobile:"Mobile",product:"Product",wood:"Wood",qty:"Qty",total:"Total",advance:"Advance",pending:"Pending",status:"Status",payMethod:"Payment",deliveredAt:"Delivered",deliveredLocation:"Location"};
   const fv=(k,v)=>{
     if(k==="orderNum") return v?fmtON(v):"—";
@@ -1994,6 +2094,89 @@ function Reports({orders}){
       {tab==="customers"&&(
         <CustomerTab orders={orders} custQ={custQ} setCustQ={setCustQ}/>
       )}
+
+      {tab==="feedback"&&(
+        <FeedbackTab orders={orders} rated={rated}/>
+      )}
+    </div>
+  );
+}
+
+// ── FEEDBACK TAB (rating analytics) ──
+function FeedbackTab({orders,rated}){
+  const deliCount=orders.filter(o=>o.status===S.DELI).length;
+  const sentCount=orders.filter(o=>o.feedbackSent).length;
+  const avgRating=rated.length?(rated.reduce((a,o)=>a+o.customerRating,0)/rated.length):0;
+  const counts={5:0,4:0,3:0,2:0,1:0};
+  rated.forEach(o=>{counts[o.customerRating]=(counts[o.customerRating]||0)+1;});
+  const lowRatings=counts[1]+counts[2];
+  const maxCount=Math.max(1,...Object.values(counts));
+
+  const statCards=[
+    {l:"Average Rating",v:rated.length?avgRating.toFixed(1)+" ⭐":"—",c:"#854f0b"},
+    {l:"Total Reviews",v:rated.length,c:"#185fa5"},
+    {l:"5-Star Reviews",v:counts[5],c:"#1d9e75"},
+    {l:"4-Star Reviews",v:counts[4],c:"#3b9e6f"},
+    {l:"Low Ratings (1-2★)",v:lowRatings,c:lowRatings>0?"#cc0000":"#999"},
+  ];
+
+  return(
+    <div>
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
+        {statCards.map(s=>(
+          <div key={s.l} className="card" style={{padding:"14px 16px"}}>
+            <div style={{fontSize:10.5,color:"#bbb",marginBottom:5}}>{s.l}</div>
+            <div style={{fontSize:24,fontWeight:700,color:s.c}}>{s.v}</div>
+          </div>
+        ))}
+      </div>
+
+      <div style={{display:"flex",gap:16,flexWrap:"wrap",marginBottom:20}}>
+        <div style={{background:"#fafaf8",borderRadius:10,padding:"10px 16px",fontSize:12.5,color:"#777"}}>
+          <i className="ti ti-circle-check" style={{color:"#185fa5",marginRight:6}}/>
+          <b>{deliCount}</b> orders delivered
+        </div>
+        <div style={{background:"#fafaf8",borderRadius:10,padding:"10px 16px",fontSize:12.5,color:"#777"}}>
+          <i className="ti ti-brand-whatsapp" style={{color:"#25D366",marginRight:6}}/>
+          <b>{sentCount}</b> feedback requests sent
+        </div>
+        <div style={{background:"#fafaf8",borderRadius:10,padding:"10px 16px",fontSize:12.5,color:"#777"}}>
+          <i className="ti ti-star" style={{color:"#854f0b",marginRight:6}}/>
+          <b>{rated.length}</b> ratings received
+        </div>
+      </div>
+
+      {/* ── Rating distribution bar chart ── */}
+      <div className="card" style={{marginBottom:20}}>
+        <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:14}}>Rating Distribution</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {[5,4,3,2,1].map(n=>(
+            <div key={n} style={{display:"flex",alignItems:"center",gap:10}}>
+              <div style={{width:34,fontSize:12.5,fontWeight:600,color:"#555",flexShrink:0}}>{n}★</div>
+              <div style={{flex:1,background:"#f5f2ee",borderRadius:6,height:18,overflow:"hidden"}}>
+                <div style={{width:`${(counts[n]/maxCount)*100}%`,height:"100%",background:n>=4?"#1d9e75":n===3?"#854f0b":"#cc0000",borderRadius:6,transition:"width .3s"}}/>
+              </div>
+              <div style={{width:26,fontSize:12,color:"#999",textAlign:"right",flexShrink:0}}>{counts[n]}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      {/* ── Recent reviews list ── */}
+      <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Recent Reviews</div>
+      <div style={{display:"flex",flexDirection:"column",gap:9}}>
+        {rated.length===0&&<div style={{textAlign:"center",padding:30,color:"#bbb",background:"#fff",borderRadius:14}}>No ratings received yet</div>}
+        {rated.slice().reverse().map(o=>(
+          <div key={o.id} className="card" style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+            <div>
+              <div style={{fontWeight:600,fontSize:13}}>{o.customer}</div>
+              <div style={{fontSize:11,color:"#bbb"}}>{o.orderNum?fmtON(o.orderNum)+" · ":""}{o.product}</div>
+              {o.customerReviewText&&<div style={{fontSize:12,color:"#777",marginTop:3,fontStyle:"italic"}}>"{o.customerReviewText}"</div>}
+            </div>
+            <div style={{fontSize:16}}>{"⭐".repeat(o.customerRating)}</div>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
