@@ -64,7 +64,8 @@ const S={PEND:"Pending Factory Acceptance",PROD:"In Production",TRANSIT:"In Tran
 const DELIVERY_LOCATIONS=["At Office","At Production"];
 
 // ── Configurable Google Review link — update this with your actual Google Business review URL ──
-const GOOGLE_REVIEW_URL="https://g.page/r/PASTE_YOUR_GOOGLE_REVIEW_LINK/review";
+const GOOGLE_REVIEW_URL="https://share.google/sSfLPa63lWPZmwBPm";
+const HSM_WHATSAPP_NUMBER="917030191916";
 
 const genId=()=>"HSM-"+Math.random().toString(36).toUpperCase().slice(2,8);
 const now2=()=>new Date().toLocaleString("en-IN");
@@ -557,27 +558,27 @@ function DeleteConfirm({order,onConfirm,onCancel}){
 function sendWhatsApp(orders_created){
   const o=orders_created[0];
   const num=o.mobile.replace(/\D/g,"");
-  const itemLines=orders_created.map(it=>
-    `• ${it.product} | ${it.wood}\n📏 Size: ${it.size}   Qty: ${it.qty}`
+  const itemLines=orders_created.map((it,i)=>
+    `• Item ${i+1}: ${it.product} | ${it.wood} | ${it.size} | Qty: ${it.qty}`
   ).join("\n");
   const totalAmt=orders_created.reduce((a,x)=>a+x.total,0);
   const advAmt=orders_created.reduce((a,x)=>a+x.advance,0);
   const pendAmt=orders_created.reduce((a,x)=>a+x.pending,0);
 
   const msg=
-`*Hanuman Saw Mill*
+`Hello *${o.customer}*! Your order has been placed.
 
-Dear ${o.customer},
-Your order has been confirmed.
+📋 *Order No:* ${o.orderNum?fmtON(o.orderNum):"—"}
 
-Order No: ${o.orderNum?fmtON(o.orderNum):"—"}
+📦 *Items:*
 ${itemLines}
 
-Total: ₹${totalAmt.toLocaleString("en-IN")}   Advance: ₹${advAmt.toLocaleString("en-IN")}   Balance: ₹${pendAmt.toLocaleString("en-IN")}
-${o.delivery?"Delivery Date: "+fmtD(o.delivery):""}
+*Total:* ₹${totalAmt.toLocaleString("en-IN")}
+*Advance Paid:* ₹${advAmt.toLocaleString("en-IN")}
+*Pending:* ₹${pendAmt.toLocaleString("en-IN")}
+*Delivery Date:* ${o.delivery?fmtD(o.delivery):"—"}
 
-Thank you for choosing Hanuman Saw Mill. We will keep you updated on your order status.
-— Hanuman Saw Mill`;
+Thank you for your order! 🙏`;
 
   const url="https://wa.me/91"+num+"?text="+encodeURIComponent(msg);
   window.open(url,"_blank");
@@ -589,8 +590,7 @@ function sendFeedbackRequest(order){
   const msg=
 `*Hanuman Saw Mill*
 
-Dear ${order.customer},
-Thank you for your order. We hope you are satisfied with our product and service.
+Hello *${order.customer}*, thank you for your order.
 
 Please rate your experience:
 ⭐⭐⭐⭐⭐ Excellent
@@ -599,13 +599,12 @@ Please rate your experience:
 ⭐⭐ Needs Improvement
 ⭐ Poor
 
-You can simply click a rating below or reply with a number from 1 to 5.
+Please reply with your rating from 1 to 5.
 
 If you are happy with our service, we would greatly appreciate a Google Review.
-${GOOGLE_REVIEW_URL}
 
-Thank you for your support.
-— Hanuman Saw Mill`;
+*Google Review:*
+${GOOGLE_REVIEW_URL}`;
 
   const url="https://wa.me/91"+num+"?text="+encodeURIComponent(msg);
   window.open(url,"_blank");
@@ -619,9 +618,17 @@ const RATING_TEXT={
   2:"My rating is 2/5. Needs improvement.",
   1:"My rating is 1/5. Poor experience.",
 };
+const RATING_LABEL={
+  5:"⭐⭐⭐⭐⭐ Excellent",
+  4:"⭐⭐⭐⭐ Good",
+  3:"⭐⭐⭐ Average",
+  2:"⭐⭐ Needs Improvement",
+  1:"⭐ Poor",
+};
 function sendRatingReply(order,stars){
-  const num=order.mobile.replace(/\D/g,"");
-  const url="https://wa.me/91"+num+"?text="+encodeURIComponent(RATING_TEXT[stars]||"");
+  const num=HSM_WHATSAPP_NUMBER.replace(/\D/g,"");
+  const base=num?("https://wa.me/"+num):"https://wa.me/";
+  const url=base+"?text="+encodeURIComponent(RATING_TEXT[stars]||"");
   window.open(url,"_blank");
 }
 
@@ -1165,19 +1172,24 @@ function OrderList({orders,updOrder,delOrder,toast2,user}){
             {/* Clickable rating links — opens WhatsApp with a prefilled reply for that rating */}
             {!sel.customerRating&&sel.feedbackSent&&(
               <div style={{marginTop:12}}>
-                <div style={{fontSize:11,color:"#bbb",marginBottom:6}}>Quick rating links (or record manually if customer replied by text):</div>
-                <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                <div style={{fontSize:11,color:"#bbb",marginBottom:6}}>Clickable rating options:</div>
+                <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(180px,1fr))",gap:7}}>
                   {[5,4,3,2,1].map(n=>(
-                    <button key={n} className="btn btn-outline" style={{padding:"7px 11px",fontSize:12.5}}
+                    <button key={n} className="btn btn-outline" style={{padding:"9px 11px",fontSize:12.5,justifyContent:"center"}}
                       onClick={()=>{
                         sendRatingReply(sel,n);
                         updOrder(sel.id,{customerRating:n});
                         setSel({...sel,customerRating:n});
                         toast2(n+"-star rating recorded");
                       }}>
-                      {"⭐".repeat(n)}
+                      {RATING_LABEL[n]}
                     </button>
                   ))}
+                </div>
+                <div style={{marginTop:12,padding:"11px 12px",background:"#fafaf8",borderRadius:10,fontSize:12.5,color:"#777",lineHeight:1.45}}>
+                  <div>If you are happy with our service, we would greatly appreciate a Google Review.</div>
+                  <div style={{fontWeight:700,color:"#1a1a1a",marginTop:5}}>Google Review:</div>
+                  <a href={GOOGLE_REVIEW_URL} target="_blank" style={{color:"#cc0000",fontWeight:700,wordBreak:"break-word"}}>{GOOGLE_REVIEW_URL}</a>
                 </div>
               </div>
             )}
