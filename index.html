@@ -1539,6 +1539,7 @@ function Deliver({orders,updOrder,user,toast2}){
   const [pt,setPt]=useState("full");
   const [partial,setPartial]=useState("");
   const [loc,setLoc]=useState("At Office");
+  const [justDelivered,setJustDelivered]=useState(null); // holds the completed order right after delivery
 
   const findByText=useCallback(text=>{
     const t=text.trim();
@@ -1563,11 +1564,49 @@ function Deliver({orders,updOrder,user,toast2}){
   const markDel=()=>{
     if(found.status===S.PEND){toast2("Order not yet accepted by factory","err");return;}
     const pendFinal=pt==="full"?0:pt==="partial"?Math.max(0,found.pending-Number(partial)):found.pending;
+    const updatedOrder={...found,status:S.DELI,pending:pendFinal,payMethod:pm,payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:loc};
     updOrder(found.id,{status:S.DELI,pending:pendFinal,payMethod:pm,payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:loc});
     toast2("Delivered & Paid!");
-    setTimeout(()=>printInvoice({...found,status:S.DELI,pending:pendFinal,payMethod:pm,deliveredAt:now2(),deliveredLocation:loc}),400);
+    setTimeout(()=>printInvoice(updatedOrder),400);
+    setJustDelivered(updatedOrder);
     setFound(null);setMid("");setPt("full");setPartial("");setLoc("At Office");
   };
+
+  // ── Success screen after marking delivered — offers immediate feedback request ──
+  if(justDelivered) return(
+    <div style={{maxWidth:480,margin:"0 auto"}}>
+      <div className="card" style={{textAlign:"center"}}>
+        <div style={{width:52,height:52,background:"#e1f5ee",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 12px"}}>
+          <i className="ti ti-check" style={{fontSize:26,color:"#1d9e75"}}/>
+        </div>
+        <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>Order Delivered!</div>
+        {justDelivered.orderNum&&<div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>Order {fmtON(justDelivered.orderNum)}</div>}
+        <div style={{fontSize:13,color:"#999",marginBottom:18}}>{justDelivered.customer} · {justDelivered.mobile}</div>
+
+        <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:18,textAlign:"left"}}>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:4}}><span style={{color:"#999"}}>Total</span><b>{fmtM(justDelivered.total)}</b></div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:4}}><span style={{color:"#999"}}>Payment Method</span><b>{justDelivered.payMethod}</b></div>
+          <div style={{display:"flex",justifyContent:"space-between",fontSize:13}}><span style={{color:"#999"}}>Pending</span><b style={{color:justDelivered.pending>0?"#cc0000":"#1d9e75"}}>{fmtM(justDelivered.pending)}</b></div>
+        </div>
+
+        <div style={{fontSize:12,color:"#888",marginBottom:10}}>Want to ask the customer for feedback now?</div>
+        <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+          <button className="btn" style={{background:"#25D366",color:"#fff",fontWeight:700,fontSize:14}}
+            onClick={()=>{
+              sendFeedbackRequest(justDelivered);
+              updOrder(justDelivered.id,{feedbackSent:true,feedbackSentAt:now2()});
+              toast2("Feedback request sent on WhatsApp!");
+              setJustDelivered(null);
+            }}>
+            <i className="ti ti-brand-whatsapp" style={{fontSize:18}}/>Send Feedback Request
+          </button>
+          <button className="btn btn-outline" onClick={()=>setJustDelivered(null)}>
+            <i className="ti ti-qrcode"/>Scan Next Order
+          </button>
+        </div>
+      </div>
+    </div>
+  );
 
   return(
     <div style={{maxWidth:500,margin:"0 auto"}}>
