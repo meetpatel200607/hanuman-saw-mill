@@ -4,15 +4,110 @@
 <meta charset="UTF-8"/>
 <meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no"/>
 <title>Hanuman Saw Mill</title>
-<meta name="theme-color" content="#8b1618"/>
-<meta name="mobile-web-app-capable" content="yes"/>
+
+<!-- ── PWA Meta Tags ── -->
+<meta name="application-name" content="HSM"/>
 <meta name="apple-mobile-web-app-capable" content="yes"/>
-<meta name="apple-mobile-web-app-title" content="Hanuman Saw Mill"/>
-<meta name="apple-mobile-web-app-status-bar-style" content="default"/>
-<link rel="manifest" href="./manifest.json"/>
-<link rel="icon" type="image/png" sizes="192x192" href="./icons/icon-192.png"/>
-<link rel="icon" type="image/png" sizes="512x512" href="./icons/icon-512.png"/>
-<link rel="apple-touch-icon" href="./icons/apple-touch-icon.png"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="HSM"/>
+<meta name="theme-color" content="#cc0000"/>
+<meta name="mobile-web-app-capable" content="yes"/>
+<meta name="description" content="Hanuman Saw Mill — Order & Factory Management"/>
+
+<!-- ── PWA Icons generated inline via canvas (no external image needed) ── -->
+<link rel="apple-touch-icon" id="apple-icon" sizes="192x192"/>
+<link rel="icon" id="pwa-icon-32" type="image/png" sizes="32x32"/>
+<link rel="icon" id="pwa-icon-192" type="image/png" sizes="192x192"/>
+
+<!-- ── PWA Manifest injected dynamically after icon generation ── -->
+<script>
+function generateHSMIcon(size){
+  const c=document.createElement("canvas");
+  c.width=size;c.height=size;
+  const ctx=c.getContext("2d");
+  const r=size*0.13; // corner radius for squircle feel
+
+  // Background — deep red gradient
+  const grad=ctx.createLinearGradient(0,0,size,size);
+  grad.addColorStop(0,"#cc0000");
+  grad.addColorStop(1,"#8b0000");
+  ctx.beginPath();
+  ctx.moveTo(r,0);ctx.lineTo(size-r,0);ctx.quadraticCurveTo(size,0,size,r);
+  ctx.lineTo(size,size-r);ctx.quadraticCurveTo(size,size,size-r,size);
+  ctx.lineTo(r,size);ctx.quadraticCurveTo(0,size,0,size-r);
+  ctx.lineTo(0,r);ctx.quadraticCurveTo(0,0,r,0);
+  ctx.closePath();
+  ctx.fillStyle=grad;ctx.fill();
+
+  // Subtle wood grain lines
+  ctx.globalAlpha=0.08;
+  ctx.strokeStyle="#fff";ctx.lineWidth=size*0.012;
+  for(let i=0;i<6;i++){
+    ctx.beginPath();ctx.moveTo(0,size*(0.1+i*0.15));ctx.bezierCurveTo(size*0.3,size*(0.08+i*0.15),size*0.7,size*(0.12+i*0.15),size,size*(0.1+i*0.15));ctx.stroke();
+  }
+  ctx.globalAlpha=1;
+
+  // Outer ring
+  ctx.beginPath();
+  ctx.arc(size/2,size/2,size*0.44,0,Math.PI*2);
+  ctx.strokeStyle="rgba(255,255,255,0.25)";ctx.lineWidth=size*0.012;ctx.stroke();
+
+  // "H" — large, bold, centered
+  const fs=size*0.52;
+  ctx.fillStyle="#ffffff";
+  ctx.font=`900 ${fs}px 'Georgia', serif`;
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  ctx.shadowColor="rgba(0,0,0,0.3)";
+  ctx.shadowBlur=size*0.03;
+  ctx.fillText("H",size/2,size*0.38);
+
+  // "SM" — smaller, below H
+  const fs2=size*0.22;
+  ctx.font=`700 ${fs2}px 'Georgia', serif`;
+  ctx.shadowBlur=0;
+  ctx.fillStyle="rgba(255,255,255,0.9)";
+  ctx.fillText("SM",size/2,size*0.72);
+
+  // Thin bottom line accent
+  ctx.fillStyle="rgba(255,255,255,0.35)";
+  ctx.fillRect(size*0.3,size*0.84,size*0.4,size*0.018);
+
+  return c.toDataURL("image/png");
+}
+
+// Generate icons and inject manifest
+window.addEventListener("DOMContentLoaded",()=>{
+  const icon192=generateHSMIcon(192);
+  const icon512=generateHSMIcon(512);
+  const icon32=generateHSMIcon(32);
+
+  document.getElementById("apple-icon").href=icon192;
+  document.getElementById("pwa-icon-32").href=icon32;
+  document.getElementById("pwa-icon-192").href=icon192;
+
+  // Inject manifest
+  const manifest={
+    name:"Hanuman Saw Mill",
+    short_name:"HSM",
+    description:"Order & Factory Management",
+    start_url:"./",
+    display:"standalone",
+    orientation:"portrait",
+    background_color:"#cc0000",
+    theme_color:"#cc0000",
+    icons:[
+      {src:icon192,sizes:"192x192",type:"image/png",purpose:"any maskable"},
+      {src:icon512,sizes:"512x512",type:"image/png",purpose:"any maskable"},
+    ]
+  };
+  const blob=new Blob([JSON.stringify(manifest)],{type:"application/manifest+json"});
+  const url=URL.createObjectURL(blob);
+  const link=document.createElement("link");
+  link.rel="manifest";link.href=url;
+  document.head.appendChild(link);
+});
+</script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/babel-standalone/7.23.5/babel.min.js"></script>
@@ -2245,9 +2340,22 @@ function FeedbackTab({orders,rated}){
 ReactDOM.createRoot(document.getElementById("root")).render(<App/>);
 </script>
 <script>
+// ── PWA Service Worker registration ──
 if("serviceWorker" in navigator){
   window.addEventListener("load",()=>{
-    navigator.serviceWorker.register("./service-worker.js").catch(console.error);
+    // Inline service worker — no separate sw.js file needed
+    const swCode=`
+const CACHE="hsm-v1";
+const ASSETS=["/"];
+self.addEventListener("install",e=>e.waitUntil(caches.open(CACHE).then(c=>c.addAll(ASSETS))));
+self.addEventListener("activate",e=>e.waitUntil(caches.keys().then(keys=>Promise.all(keys.filter(k=>k!==CACHE).map(k=>caches.delete(k))))));
+self.addEventListener("fetch",e=>{
+  if(e.request.method!=="GET") return;
+  e.respondWith(fetch(e.request).catch(()=>caches.match(e.request)));
+});`;
+    const blob=new Blob([swCode],{type:"application/javascript"});
+    const url=URL.createObjectURL(blob);
+    navigator.serviceWorker.register(url).catch(()=>{});
   });
 }
 </script>
