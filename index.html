@@ -496,6 +496,24 @@ function Dashboard({orders,goto,user}){
   const deli=orders.filter(o=>o.status===S.DELI).length;
   const pendAmt=orders.filter(o=>o.status!==S.DELI).reduce((a,o)=>a+Number(o.pending),0);
   const rev=orders.filter(o=>o.status===S.DELI).reduce((a,o)=>a+Number(o.total),0);
+
+  // ── Today's Summary calculations ──
+  const todayStr=todayKey();
+  const yesterdayStr=(()=>{const d=new Date();d.setDate(d.getDate()-1);return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;})();
+  const todayDeli=orders.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===todayStr;});
+  const yestDeli=orders.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===yesterdayStr;});
+  const yestCash=yestDeli.filter(o=>o.payMethod==="Cash").reduce((a,o)=>a+Number(o.total),0);
+  const yestAdvCash=orders.filter(o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===yesterdayStr&&Number(o.advance)>0&&(!o.advPayMethod||o.advPayMethod==="Cash");}).reduce((a,o)=>a+Number(o.advance),0);
+
+  // Overdue = delivery date has passed but not yet delivered
+  const today=new Date();today.setHours(0,0,0,0);
+  const overdue=orders.filter(o=>{
+    if(o.status===S.DELI) return false;
+    if(!o.delivery) return false;
+    const d=new Date(o.delivery);d.setHours(0,0,0,0);
+    return d<today;
+  });
+
   const stats=[
     {l:"Total Orders",v:orders.length,icon:"ti-clipboard-list",c:"#cc0000"},
     {l:"Awaiting Acceptance",v:pend,icon:"ti-clock-pause",c:"#a32d2d"},
@@ -508,8 +526,48 @@ function Dashboard({orders,goto,user}){
       {l:"Total Revenue",v:fmtM(rev),icon:"ti-currency-rupee",c:"#3b6d11"},
     ]:[]),
   ];
+
   return(
     <div>
+      {/* ── Today's Summary — Admin only ── */}
+      {["Admin","Accountant"].includes(user.role)&&(
+        <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#1a1a1a,#2d1a00)",border:"none"}}>
+          <div style={{fontSize:11,color:"#aaa",fontWeight:700,textTransform:"uppercase",letterSpacing:.6,marginBottom:12}}>Today's Summary</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:10}}>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:28,fontWeight:900,color:pend>0?"#ff6b6b":"#aaa"}}>{pend}</div>
+              <div style={{fontSize:10.5,color:"#888",marginTop:2}}>Awaiting<br/>Acceptance</div>
+            </div>
+            <div style={{textAlign:"center",borderLeft:"1px solid #333",borderRight:"1px solid #333"}}>
+              <div style={{fontSize:28,fontWeight:900,color:overdue.length>0?"#ff6b6b":"#aaa"}}>{overdue.length}</div>
+              <div style={{fontSize:10.5,color:"#888",marginTop:2}}>Overdue<br/>Orders</div>
+            </div>
+            <div style={{textAlign:"center"}}>
+              <div style={{fontSize:22,fontWeight:900,color:"#4ade80"}}>{fmtM(yestCash+yestAdvCash)}</div>
+              <div style={{fontSize:10.5,color:"#888",marginTop:2}}>Yesterday's<br/>Cash</div>
+            </div>
+          </div>
+          {todayDeli.length>0&&<div style={{marginTop:12,paddingTop:10,borderTop:"1px solid #333",fontSize:12,color:"#888"}}>
+            <i className="ti ti-circle-check" style={{color:"#4ade80",marginRight:5}}/>
+            <b style={{color:"#fff"}}>{todayDeli.length}</b> order{todayDeli.length===1?"":"s"} delivered today
+          </div>}
+        </div>
+      )}
+
+      {/* ── Overdue alert banner ── */}
+      {overdue.length>0&&(
+        <div style={{background:"#fff3f3",border:"1.5px solid #ffaaaa",borderRadius:12,padding:"11px 16px",marginBottom:16,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <i className="ti ti-alert-triangle" style={{color:"#cc0000",fontSize:18}}/>
+            <div>
+              <div style={{fontWeight:700,color:"#cc0000",fontSize:13}}>{overdue.length} Order{overdue.length===1?"":"s"} Overdue</div>
+              <div style={{fontSize:11.5,color:"#999"}}>Delivery date has passed — follow up needed</div>
+            </div>
+          </div>
+          <button className="btn btn-danger" style={{padding:"6px 12px",fontSize:12}} onClick={()=>goto("orders")}>View Orders →</button>
+        </div>
+      )}
+
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
         {stats.map(s=>(
           <div key={s.l} className="card" style={{padding:"14px 16px"}}>
@@ -528,16 +586,17 @@ function Dashboard({orders,goto,user}){
         </div>
         <div style={{overflowX:"auto"}}>
           <table style={{width:"100%",borderCollapse:"collapse",fontSize:12.5}}>
-            <thead><tr style={{borderBottom:"1px solid #f0ede8"}}>{["Order #","Order ID","Customer","Product","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#bbb",fontSize:11}}>{h}</th>)}</tr></thead>
-            <tbody>{orders.slice(0,6).map(o=>(
-              <tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>
+            <thead><tr style={{borderBottom:"1px solid #f0ede8"}}>{["Order #","Customer","Product","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#bbb",fontSize:11}}>{h}</th>)}</tr></thead>
+            <tbody>{orders.slice(0,6).map(o=>{
+              const isOver=o.status!==S.DELI&&o.delivery&&new Date(o.delivery)<today;
+              return(
+              <tr key={o.id} style={{borderBottom:"1px solid #fafaf8",background:isOver?"#fff8f8":"transparent"}}>
                 <td style={{padding:"9px 10px",fontWeight:900,color:"#cc0000",fontSize:13}}>{fmtON(o.orderNum)}</td>
-                <td style={{padding:"9px 10px",fontWeight:600,color:"#888",fontSize:11}}>{o.id}</td>
-                <td style={{padding:"9px 10px"}}>{o.customer}</td>
+                <td style={{padding:"9px 10px"}}>{o.customer}{isOver&&<span style={{marginLeft:5,fontSize:10,color:"#cc0000",fontWeight:700}}>OVERDUE</span>}</td>
                 <td style={{padding:"9px 10px",color:"#777"}}>{o.product}</td>
                 <td style={{padding:"9px 10px"}}><StatusBadge s={o.status}/></td>
               </tr>
-            ))}</tbody>
+            )})}</tbody>
           </table>
         </div>
       </div>
@@ -1093,6 +1152,21 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
   );
 }
 
+// ── FUZZY SEARCH helper — tolerates typos and partial matches ──
+function fuzzyMatch(str,q){
+  if(!str||!q) return false;
+  str=str.toLowerCase();q=q.toLowerCase().trim();
+  if(str.includes(q)) return true;
+  // Allow 1 character difference for strings longer than 3 chars
+  if(q.length>=3){
+    for(let i=0;i<q.length;i++){
+      const variant=q.slice(0,i)+q.slice(i+1); // drop one char
+      if(str.includes(variant)) return true;
+    }
+  }
+  return false;
+}
+
 // ── ORDER LIST ──
 function OrderList({orders,updOrder,delOrder,toast2,user}){
   const [q,setQ]=useState("");
@@ -1104,8 +1178,14 @@ function OrderList({orders,updOrder,delOrder,toast2,user}){
   const matchQ=(o,q)=>{
     if(!q) return true;
     const t=q.toLowerCase().trim();
-    return o.customer.toLowerCase().includes(t)||o.mobile.includes(t)||o.id.toLowerCase().includes(t)||
-      (o.orderNum&&(String(o.orderNum)===t||fmtON(o.orderNum).toLowerCase()===t||("#"+String(o.orderNum))===t));
+    // Exact matches first (order number, ID, mobile)
+    if(o.mobile.includes(t)) return true;
+    if(o.id.toLowerCase().includes(t)) return true;
+    if(o.orderNum&&(String(o.orderNum)===t||fmtON(o.orderNum).toLowerCase()===t||("#"+String(o.orderNum))===t)) return true;
+    // Fuzzy match on customer name and product
+    if(fuzzyMatch(o.customer,t)) return true;
+    if(fuzzyMatch(o.product,t)) return true;
+    return false;
   };
   const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
   const doDelete=(o)=>{setDelTarget(o);setSel(null);};
@@ -1491,6 +1571,58 @@ function Factory({orders,delOrder,updOrder,user,onAdd,toast2,goto}){
 
       <Section title="In Transit" color="#6a1bb5" list={inTransit} emptyMsg="Nothing currently in transit"
         renderAction={o=><span style={{fontSize:11,color:"#6a1bb5",fontWeight:600,padding:"7px 10px"}}><i className="ti ti-truck" style={{marginRight:4}}/>On the way</span>}/>
+
+      {/* ── Last 7 days history — read-only for factory staff ── */}
+      <FactoryHistory orders={orders}/>
+    </div>
+  );
+}
+
+// ── FACTORY HISTORY (last 7 days, read-only) ──
+function FactoryHistory({orders}){
+  const [open,setOpen]=useState(false);
+  const sevenDaysAgo=new Date();sevenDaysAgo.setDate(sevenDaysAgo.getDate()-7);sevenDaysAgo.setHours(0,0,0,0);
+
+  const recent=orders.filter(o=>{
+    if(o.status!==S.DELI&&o.status!==S.RECV&&o.status!==S.TRANSIT) return false;
+    const p=parseLocaleDate(o.deliveredAt||o.dispatchedAt||o.receivedAt||o.created);
+    if(!p) return false;
+    const d=new Date(p.y,p.m-1,p.d);
+    return d>=sevenDaysAgo;
+  }).sort((a,b)=>(b.deliveredAt||b.dispatchedAt||"").localeCompare(a.deliveredAt||a.dispatchedAt||""));
+
+  return(
+    <div style={{marginTop:8}}>
+      <button className="btn btn-outline" style={{width:"100%",justifyContent:"space-between",padding:"12px 16px"}} onClick={()=>setOpen(p=>!p)}>
+        <div style={{display:"flex",alignItems:"center",gap:8}}>
+          <i className="ti ti-history" style={{fontSize:16}}/>
+          <span>Recent History (Last 7 Days)</span>
+          <span style={{background:"#cc000018",color:"#cc0000",borderRadius:8,padding:"1px 8px",fontSize:11,fontWeight:700}}>{recent.length}</span>
+        </div>
+        <i className={`ti ${open?"ti-chevron-up":"ti-chevron-down"}`}/>
+      </button>
+      {open&&(
+        <div style={{marginTop:8,display:"flex",flexDirection:"column",gap:7}}>
+          {recent.length===0&&<div style={{textAlign:"center",padding:24,color:"#bbb",background:"#fff",borderRadius:12,fontSize:13}}>No completed orders in the last 7 days</div>}
+          {recent.map(o=>(
+            <div key={o.id} className="card" style={{padding:"11px 14px",border:"1px solid #eeebe6",opacity:0.85}}>
+              <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div style={{display:"flex",alignItems:"center",gap:10}}>
+                  <div style={{width:38,height:38,background:"#fafaf8",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    <span style={{fontSize:11,fontWeight:900,color:"#cc0000"}}>{o.orderNum?fmtON(o.orderNum):"—"}</span>
+                  </div>
+                  <div>
+                    <div style={{fontWeight:600,fontSize:13}}>{o.customer}</div>
+                    <div style={{fontSize:11.5,color:"#999"}}>{o.product} · {o.wood} · {o.size} · Qty {o.qty}</div>
+                    <div style={{fontSize:11,color:"#bbb",marginTop:1}}>{o.deliveredAt||o.dispatchedAt||o.receivedAt?((o.deliveredAt||o.dispatchedAt||o.receivedAt).split(",")[0]):"—"}</div>
+                  </div>
+                </div>
+                <StatusBadge s={o.status}/>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -1693,21 +1825,24 @@ function Deliver({orders,updOrder,user,toast2}){
               ))}
             </div>
           </div>
-          <div style={{marginBottom:12}}>
-            <div style={{fontSize:11.5,fontWeight:600,color:"#777",marginBottom:7}}>Payment Status</div>
-            <div style={{display:"flex",gap:8}}>
-              {[["full","Paid Full"],["partial","Partial"],["pending","Still Pending"]].map(([k,l])=>(
-                <button key={k} className="btn" onClick={()=>setPt(k)} style={{flex:1,justifyContent:"center",background:pt===k?"#cc0000":"#fff",color:pt===k?"#fff":"#555",border:`1.5px solid ${pt===k?"#cc0000":"#ddd"}`,fontSize:12}}>{l}</button>
+
+          {/* ── Simplified payment — standard is Cash + Full, show extra only if changed ── */}
+          <div style={{background:"#f9f9f9",borderRadius:12,padding:12,marginBottom:14}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#888",marginBottom:10,textTransform:"uppercase",letterSpacing:.4}}>Payment</div>
+            <div style={{display:"flex",gap:8,marginBottom:pt==="partial"?10:0}}>
+              {[["full","✓ Paid Full"],["partial","Partial"],["pending","Still Pending"]].map(([k,l])=>(
+                <button key={k} className="btn" onClick={()=>setPt(k)} style={{flex:1,justifyContent:"center",background:pt===k?"#cc0000":"#fff",color:pt===k?"#fff":"#666",border:`1.5px solid ${pt===k?"#cc0000":"#e0ddd8"}`,fontSize:12.5,fontWeight:pt===k?700:500}}>{l}</button>
               ))}
             </div>
-          </div>
-          {pt==="partial"&&<div style={{marginBottom:12}}><label style={{...LBL}}>Amount Collected (₹)</label><input type="number" className="inp" value={partial} onChange={e=>setPartial(e.target.value)} placeholder="Enter amount"/></div>}
-          <div style={{marginBottom:16}}>
-            <div style={{fontSize:11.5,fontWeight:600,color:"#777",marginBottom:7}}>Payment Method</div>
-            <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-              {PAY_M.map(m=>(<button key={m} className="btn" onClick={()=>setPm(m)} style={{background:pm===m?"#1a1a1a":"#fff",color:pm===m?"#fff":"#555",border:`1.5px solid ${pm===m?"#1a1a1a":"#ddd"}`}}>{m}</button>))}
+            {pt==="partial"&&<input type="number" className="inp" value={partial} onChange={e=>setPartial(e.target.value)} placeholder="Amount collected (₹)" style={{marginBottom:8}}/>}
+            <div style={{display:"flex",gap:8,marginTop:8}}>
+              {PAY_M.map(m=>(
+                <button key={m} className="btn" onClick={()=>setPm(m)} style={{flex:1,justifyContent:"center",background:pm===m?"#1a1a1a":"#fff",color:pm===m?"#fff":"#666",border:`1.5px solid ${pm===m?"#1a1a1a":"#e0ddd8"}`,fontSize:12}}>{m}</button>
+              ))}
             </div>
+            {pt==="full"&&pm==="Cash"&&<div style={{marginTop:8,fontSize:11,color:"#1d9e75",fontWeight:600,textAlign:"center"}}>✓ Standard — Cash, Fully Paid</div>}
           </div>
+
           {found.status===S.DELI
             ?<div style={{padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:600,textAlign:"center",fontSize:13}}>✓ Already Delivered & Paid</div>
             :found.status===S.PEND
