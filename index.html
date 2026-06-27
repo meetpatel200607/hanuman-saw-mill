@@ -1359,7 +1359,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
     delivery:order.delivery||"",
     notes:order.notes||"",
     needsDesign:!!order.needsDesign,
-    designType:order.designType?(order.designType.replace(" + Oil Polish","").replace(" + OP","").split("+")[0].trim())||"":""
+    designType:order.designType?(order.designType.replace(" + Oil Polish","").replace(" + OP","").split("+")[0].trim())||"":"",
     designCost:String(designCostOf(order)||""),
     oilPolish:!!(order.oilPolish||(order.designType&&order.designType.includes("Oil Polish"))),
   });
