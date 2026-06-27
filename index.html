@@ -84,7 +84,7 @@ const USERS=[
 const WOODS=["Khair","Sisam","Pine","Teak","Saghwan","Deodar"];
 const PRODUCTS=["Umbra Patti","Door Frame","Window Frame","Plank","Batten","Rafter","Purlin","Custom"];
 const PAY_M=["Cash","UPI","Bank Transfer"];
-const DESIGN_TYPES=["Embossed","Acrylic","Laser","OP (Oil Polish)"];
+const DESIGN_TYPES=["Embossed","Acrylic","Laser"];
 const S={PEND:"Pending Factory Acceptance",PROD:"In Production",TRANSIT:"In Transit",RECV:"Received at Office",DELI:"Delivered & Paid"};
 const DELIVERY_LOCATIONS=["At Office","At Production"];
 
@@ -191,10 +191,10 @@ function printQR(o){
   const w=window.open("","_blank");
   w.document.write(`<!DOCTYPE html><html><head><title>QR – ${o.id}</title>
   <style>body{font-family:Arial;padding:20px;background:#fff;text-align:center}
-  .box{border:2px solid #cc0000;border-radius:12px;display:inline-block;padding:16px 20px;width:280px}
+  .box{border:2px solid #cc0000;border-radius:12px;display:inline-block;padding:16px 20px;width:260px}
   .onum{font-size:20px;font-weight:900;color:#cc0000;margin:4px 0 6px}
-  table{width:100%;font-size:11px;text-align:left;border-collapse:collapse}
-  td{padding:3px 4px}td:first-child{color:#888}@media print{body{margin:0}}</style></head>
+  table{width:100%;font-size:12px;text-align:left;border-collapse:collapse}
+  td{padding:4px 6px}td:first-child{color:#888}@media print{body{margin:0}}</style></head>
   <body onload="window.print()"><div class="box">
   <div style="font-size:26px;font-weight:900;color:#cc0000">HSM</div>
   <div style="font-size:10px;color:#888;margin-bottom:4px">HANUMAN SAW MILL</div>
@@ -203,16 +203,43 @@ function printQR(o){
   <div style="font-size:12px;font-weight:700;color:#888;margin:4px 0">${o.id}</div>
   <table>
     <tr><td>Customer</td><td><b>${o.customer}</b></td></tr>
-    <tr><td>Mobile</td><td>${o.mobile}</td></tr>
-    <tr><td>Product</td><td>${o.product} – ${o.wood}</td></tr>
     <tr><td>Size</td><td>${o.size}</td></tr>
-    <tr><td>Qty</td><td>${o.qty}</td></tr>
-    ${o.needsDesign?`<tr><td>Product</td><td>${fmtM(productTotalOf(o))}</td></tr><tr><td>Design</td><td>${o.designType||"Design"} · ${fmtM(designCostOf(o))}</td></tr>`:""}
-    <tr><td>Total</td><td>${fmtM(orderTotalOf(o))}</td></tr>
-    <tr><td>Advance</td><td>${fmtM(o.advance)}</td></tr>
-    <tr><td>Pending</td><td style="color:#cc0000"><b>${fmtM(o.pending)}</b></td></tr>
-    <tr><td>Delivery</td><td>${fmtD(o.delivery)}</td></tr>
   </table></div></body></html>`);
+  w.document.close();
+}
+
+function printMultiQR(orderList){
+  const canvases=orderList.map(o=>{
+    const tmp=document.createElement("canvas");
+    if(!drawQROnCanvas(tmp,buildQRText(o),160)) return null;
+    return {order:o,dataUrl:tmp.toDataURL("image/png")};
+  }).filter(Boolean);
+  if(!canvases.length){alert("QR generation failed");return;}
+  const w=window.open("","_blank");
+  const labels=canvases.map(({order:o,dataUrl})=>`
+    <div class="label">
+      <div class="hsm">HSM</div>
+      <div class="mill">HANUMAN SAW MILL</div>
+      ${o.orderNum?`<div class="onum">Order ${fmtON(o.orderNum)}</div>`:""}
+      <img src="${dataUrl}" width="160" height="160" style="display:block;margin:4px auto;image-rendering:pixelated;"/>
+      <div class="oid">${o.id}</div>
+      <table><tr><td>Customer</td><td><b>${o.customer}</b></td></tr><tr><td>Size</td><td>${o.size}</td></tr></table>
+    </div>`).join("");
+  w.document.write(`<!DOCTYPE html><html><head><title>Batch QR Print</title>
+  <style>
+    *{box-sizing:border-box;margin:0;padding:0}
+    body{font-family:Arial;background:#fff}
+    .grid{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;padding:12px}
+    .label{border:2px solid #cc0000;border-radius:10px;padding:10px 8px;text-align:center;break-inside:avoid}
+    .hsm{font-size:20px;font-weight:900;color:#cc0000}
+    .mill{font-size:8px;color:#888;margin-bottom:2px}
+    .onum{font-size:15px;font-weight:900;color:#cc0000;margin:2px 0}
+    .oid{font-size:9px;color:#888;margin:3px 0}
+    table{width:100%;font-size:9px;text-align:left;border-collapse:collapse}
+    td{padding:2px 4px}td:first-child{color:#888}
+    @media print{body{margin:0}.grid{gap:6px;padding:8px}}
+  </style></head>
+  <body onload="window.print()"><div class="grid">${labels}</div></body></html>`);
   w.document.close();
 }
 
@@ -959,7 +986,7 @@ function sendRatingReply(order,stars){
 
 // ── NEW ORDER ──
 const LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBottom:4};
-const emptyItem=()=>({product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",total:"",advance:"",advPayMethod:"Cash",notes:"",needsDesign:false,designType:DESIGN_TYPES[0],designCost:""});
+const emptyItem=()=>({product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",total:"",advance:"",advPayMethod:"Cash",notes:"",needsDesign:false,designType:DESIGN_TYPES[0],designCost:"",oilPolish:false});
 const DRAFT_KEY="hsm_order_draft_v1";
 
 function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
@@ -1040,7 +1067,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
 
   const updItem=(i,k,v)=>setItems(p=>{
     const n=[...p];n[i]={...n[i],[k]:v};
-    if(k==="needsDesign"&&!v){n[i].designCost="";n[i].designType=DESIGN_TYPES[0];}
+    if(k==="needsDesign"&&!v){n[i].designCost="";n[i].designType=DESIGN_TYPES[0];n[i].oilPolish=false;}
     if(k==="advance"||k==="total"||k==="designCost"||k==="needsDesign")n[i].pending=Math.max(0,(Number(n[i].total||0)+(n[i].needsDesign?Number(n[i].designCost||0):0))-Number(n[i].advance||0));
     return n;
   });
@@ -1078,6 +1105,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
       const productTotal=Number(it.total)||0;
       const designCost=it.needsDesign?Number(it.designCost)||0:0;
       const total=productTotal+designCost;
+      const designTypeFull=it.needsDesign?(it.oilPolish?(it.designType+" + Oil Polish"):it.designType):"";
       created.push({
         id:genId(),orderNum:i===0?num:null,
         customer,mobile,delivery,
@@ -1086,7 +1114,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
         pending:Math.max(0,total-(Number(it.advance)||0)),
         advPayMethod:it.advPayMethod||"Cash",
         notes:it.notes,
-        needsDesign:!!it.needsDesign,designStatus:it.needsDesign?"Pending":"",designType:it.needsDesign?it.designType:"",designCost,
+        needsDesign:!!it.needsDesign,designStatus:it.needsDesign?"Pending":"",designType:designTypeFull,designCost,oilPolish:!!it.oilPolish,
         status:S.PEND,created:now2(),createdBy:user.name,
         payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",
         acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",
@@ -1246,17 +1274,33 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
                   {it.needsDesign&&<>
                     <div>
                       <label style={LBL}>Design Type</label>
-                      <select ref={setRef(`designType-${i}`)} onKeyDown={onEnter(`designType-${i}`)} className="inp" value={it.designType} onChange={e=>updItem(i,"designType",e.target.value)}>
-                        {DESIGN_TYPES.map(d=><option key={d}>{d}</option>)}
-                      </select>
+                      <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                        {DESIGN_TYPES.map(d=>(
+                          <button key={d} type="button"
+                            onClick={()=>updItem(i,"designType",d)}
+                            className="btn"
+                            style={{padding:"7px 12px",fontSize:12,flex:1,justifyContent:"center",background:it.designType===d?"#1a1a1a":"#fff",color:it.designType===d?"#fff":"#555",border:`1.5px solid ${it.designType===d?"#1a1a1a":"#ddd"}`}}>
+                            {d}
+                          </button>
+                        ))}
+                      </div>
+                      <div style={{marginTop:8}}>
+                        <button type="button"
+                          onClick={()=>updItem(i,"oilPolish",!it.oilPolish)}
+                          className="btn"
+                          style={{width:"100%",justifyContent:"center",padding:"7px 12px",fontSize:12,background:it.oilPolish?"#fff3e0":"#fff",color:it.oilPolish?"#a35a00":"#777",border:`1.5px solid ${it.oilPolish?"#ffb74d":"#ddd"}`}}>
+                          <i className="ti ti-droplet"/>
+                          {it.oilPolish?"Oil Polish (OP) — Added":"Add Oil Polish (OP)?"}
+                        </button>
+                      </div>
                     </div>
                     <div>
                       <label style={LBL}>Design Cost (₹)</label>
                       <input ref={setRef(`designCost-${i}`)} onKeyDown={onEnter(`designCost-${i}`)} type="number" className="inp" value={it.designCost} onChange={e=>updItem(i,"designCost",e.target.value)} placeholder="0" style={{borderColor:"#ffb74d",background:"#fffaf2",fontWeight:700,color:"#a35a00"}}/>
                     </div>
-                    <div style={{background:"#fff3e0",border:"1px solid #ffd9a0",borderRadius:10,padding:"9px 11px",fontSize:12,color:"#a35a00"}}>
-                      <div style={{fontWeight:700,marginBottom:3}}>Total Order Value</div>
-                      <div>{fmtM(Number(it.total||0))} + {fmtM(Number(it.designCost||0))} = <b>{fmtM(Number(it.total||0)+Number(it.designCost||0))}</b></div>
+                    <div style={{background:"#fff3e0",border:"1px solid #ffd9a0",borderRadius:10,padding:"9px 11px",fontSize:12,color:"#a35a00",gridColumn:"span 2"}}>
+                      <div style={{fontWeight:700,marginBottom:3}}>Design: {it.designType}{it.oilPolish?" + Oil Polish (OP)":""}</div>
+                      <div>Product {fmtM(Number(it.total||0))} + Design {fmtM(Number(it.designCost||0))} = <b>{fmtM(Number(it.total||0)+Number(it.designCost||0))}</b></div>
                     </div>
                   </>}
                   <div><label style={LBL}>Advance Paid (₹)</label><input ref={setRef(`advance-${i}`)} onKeyDown={onEnter(`advance-${i}`)} type="number" className="inp" value={it.advance} onChange={e=>updItem(i,"advance",e.target.value)} placeholder="0"/></div>
@@ -1315,12 +1359,13 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
     delivery:order.delivery||"",
     notes:order.notes||"",
     needsDesign:!!order.needsDesign,
-    designType:order.designType||DESIGN_TYPES[0],
+    designType:order.designType?(order.designType.replace(" + Oil Polish","").replace(" + OP","").split("+")[0].trim())||DESIGN_TYPES[0]:DESIGN_TYPES[0],
     designCost:String(designCostOf(order)||""),
+    oilPolish:!!(order.oilPolish||(order.designType&&order.designType.includes("Oil Polish"))),
   });
   const upd=(k,v)=>setF(p=>{
     const n={...p,[k]:v};
-    if(k==="needsDesign"&&!v){n.designCost="";n.designType=DESIGN_TYPES[0];}
+    if(k==="needsDesign"&&!v){n.designCost="";n.designType=DESIGN_TYPES[0];n.oilPolish=false;}
     if(k==="advance"||k==="total"||k==="designCost"||k==="needsDesign") n.pending=Math.max(0,(Number(n.total)||0)+(n.needsDesign?Number(n.designCost||0):0)-(Number(n.advance)||0));
     return n;
   });
@@ -1336,13 +1381,14 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
     if(String(f.orderNum).trim()!==""&&(!nextNum||nextNum<1)){toast2("Enter a valid order number","err");return;}
     if(nextNum&&orders.some(o=>o.id!==order.id&&o.orderNum===nextNum)){toast2("Order number "+fmtON(nextNum)+" already exists!","err");return;}
     const size=f.dimL+'"x'+f.dimW+'"x'+f.dimT+'"';
+    const designTypeFull=f.needsDesign?(f.oilPolish?(f.designType+" + Oil Polish"):f.designType):"";
     onSave(order.id,{
       orderNum:nextNum,customer:f.customer,mobile:f.mobile,product:f.product,wood:f.wood,
       size,qty:Number(f.qty),productTotal,total,advance:Number(f.advance)||0,
       pending,advPayMethod:f.advPayMethod,delivery:f.delivery,notes:f.notes,needsDesign:f.needsDesign,
       designStatus:f.needsDesign?(order.designStatus||"Pending"):"",
-      designType:f.needsDesign?f.designType:"",
-      designCost,
+      designType:designTypeFull,
+      designCost,oilPolish:!!f.oilPolish,
     });
   };
 
@@ -1403,18 +1449,32 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
               <div><label style={lbl}>Product Amount (₹)</label><input type="number" className="inp" value={f.total} onChange={e=>upd("total",e.target.value)} placeholder="0"/></div>
               {f.needsDesign&&<>
-                <div>
+                <div style={{gridColumn:"span 2"}}>
                   <label style={lbl}>Design Type</label>
-                  <select className="inp" value={f.designType} onChange={e=>upd("designType",e.target.value)}>
-                    {DESIGN_TYPES.map(d=><option key={d}>{d}</option>)}
-                  </select>
+                  <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
+                    {DESIGN_TYPES.map(d=>(
+                      <button key={d} type="button"
+                        onClick={()=>upd("designType",d)}
+                        className="btn"
+                        style={{padding:"7px 12px",fontSize:12,flex:1,justifyContent:"center",background:f.designType===d?"#1a1a1a":"#fff",color:f.designType===d?"#fff":"#555",border:`1.5px solid ${f.designType===d?"#1a1a1a":"#ddd"}`}}>
+                        {d}
+                      </button>
+                    ))}
+                  </div>
+                  <button type="button"
+                    onClick={()=>upd("oilPolish",!f.oilPolish)}
+                    className="btn"
+                    style={{width:"100%",justifyContent:"center",padding:"7px 12px",fontSize:12,background:f.oilPolish?"#fff3e0":"#fff",color:f.oilPolish?"#a35a00":"#777",border:`1.5px solid ${f.oilPolish?"#ffb74d":"#ddd"}`}}>
+                    <i className="ti ti-droplet"/>
+                    {f.oilPolish?"Oil Polish (OP) — Added":"Add Oil Polish (OP)?"}
+                  </button>
                 </div>
                 <div>
                   <label style={lbl}>Design Cost (₹)</label>
                   <input type="number" className="inp" value={f.designCost} onChange={e=>upd("designCost",e.target.value)} placeholder="0" style={{borderColor:"#ffb74d",background:"#fffaf2",fontWeight:700,color:"#a35a00"}}/>
                 </div>
                 <div style={{background:"#fff3e0",border:"1px solid #ffd9a0",borderRadius:10,padding:"9px 11px",fontSize:12,color:"#a35a00"}}>
-                  <div style={{fontWeight:700,marginBottom:3}}>Total Order Value</div>
+                  <div style={{fontWeight:700,marginBottom:3}}>Design: {f.designType}{f.oilPolish?" + Oil Polish":""}</div>
                   <div>{fmtM(productTotal)} + {fmtM(designCost)} = <b>{fmtM(total)}</b></div>
                 </div>
               </>}
@@ -1688,6 +1748,8 @@ function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
   const [showNewOrder,setShowNewOrder]=useState(false);
   const [showScanDispatch,setShowScanDispatch]=useState(false);
   const [scanResult,setScanResult]=useState(null); // the matched order after scan
+  const [qrSelectMode,setQrSelectMode]=useState(false);
+  const [selectedQRIds,setSelectedQRIds]=useState(new Set());
 
   const acceptOrder=o=>{updOrder(o.id,{status:S.PROD,acceptedAt:now2(),acceptedBy:user.name});toast2("Order accepted — now In Production");setSel(null);};
   const confirmDispatch=o=>{updOrder(o.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name});toast2("Order marked In Transit!");setDispatchTarget(null);setSel(null);};
@@ -1750,8 +1812,13 @@ function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
       <div style={{display:"flex",flexDirection:"column",gap:9}}>
         {list.length===0&&<div style={{textAlign:"center",padding:24,color:"#bbb",background:"#fff",borderRadius:14,fontSize:13}}>{emptyMsg}</div>}
         {list.map(o=>(
-          <div key={o.id} className="card" style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",flexWrap:"wrap",border:"1px solid #eeebe6"}}>
-            <div onClick={()=>setSel(o)} style={{display:"flex",alignItems:"center",gap:12,flex:1,cursor:"pointer",minWidth:0}}>
+          <div key={o.id} className="card" style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",flexWrap:"wrap",border:qrSelectMode&&selectedQRIds.has(o.id)?"2px solid #cc0000":"1px solid #eeebe6"}}>
+            {qrSelectMode&&(
+              <div onClick={()=>setSelectedQRIds(p=>{const n=new Set(p);n.has(o.id)?n.delete(o.id):n.add(o.id);return n;})} style={{width:24,height:24,borderRadius:6,border:`2px solid ${selectedQRIds.has(o.id)?"#cc0000":"#ddd"}`,background:selectedQRIds.has(o.id)?"#cc0000":"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,transition:"all .15s"}}>
+                {selectedQRIds.has(o.id)&&<i className="ti ti-check" style={{fontSize:14,color:"#fff"}}/>}
+              </div>
+            )}
+            <div onClick={()=>!qrSelectMode&&setSel(o)} style={{display:"flex",alignItems:"center",gap:12,flex:1,cursor:qrSelectMode?"default":"pointer",minWidth:0}}>
               <div style={{width:44,height:44,background:"#fff3f3",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
                 <OrderNumberEditor order={o} orders={orders} updOrder={updOrder} user={user} toast2={toast2} compact/>
               </div>
@@ -1766,8 +1833,8 @@ function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
               </div>
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
-              {renderAction(o)}
-              <button className="btn btn-danger" title="Move to Trash" style={{padding:"6px 10px",fontSize:12}} onClick={e=>{e.stopPropagation();setDelTarget(o);}}><i className="ti ti-trash"/></button>
+              {!qrSelectMode&&renderAction(o)}
+              {!qrSelectMode&&<button className="btn btn-danger" title="Move to Trash" style={{padding:"6px 10px",fontSize:12}} onClick={e=>{e.stopPropagation();setDelTarget(o);}}><i className="ti ti-trash"/></button>}
             </div>
           </div>
         ))}
@@ -1792,6 +1859,10 @@ function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
         <div style={{fontSize:13,color:"#999"}}>{active.length} active orders in factory</div>
         <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+          <button className="btn" style={{background:qrSelectMode?"#cc0000":"#fff",color:qrSelectMode?"#fff":"#555",border:"1.5px solid #ddd"}} onClick={()=>{setQrSelectMode(p=>!p);setSelectedQRIds(new Set());}}>
+            <i className="ti ti-checkbox"/>
+            {qrSelectMode?"Cancel QR Select":"Select QR to Print"}
+          </button>
           <button className="btn" style={{background:"#6a1bb5",color:"#fff"}} onClick={()=>{setShowScanDispatch(p=>!p);setScanResult(null);}}>
             <i className="ti ti-qrcode"/>Scan to Dispatch
           </button>
@@ -1800,6 +1871,17 @@ function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
           </button>
         </div>
       </div>
+
+      {/* ── Batch QR Print bar ── */}
+      {qrSelectMode&&selectedQRIds.size>0&&(
+        <div style={{background:"#1a1a1a",borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+          <div style={{color:"#fff",fontSize:13,fontWeight:600}}><i className="ti ti-checkbox" style={{marginRight:6,color:"#cc0000"}}/>{selectedQRIds.size} order{selectedQRIds.size===1?"":"s"} selected</div>
+          <div style={{display:"flex",gap:8}}>
+            <button className="btn btn-outline" style={{fontSize:12,color:"#bbb",borderColor:"#555"}} onClick={()=>setSelectedQRIds(new Set())}>Clear</button>
+            <button className="btn btn-red" style={{fontSize:13}} onClick={()=>{const chosen=active.filter(o=>selectedQRIds.has(o.id));printMultiQR(chosen);}}><i className="ti ti-printer"/>Print {selectedQRIds.size} QR{selectedQRIds.size===1?"":"s"}</button>
+          </div>
+        </div>
+      )}
 
       {/* ── Inline Scan-to-Dispatch panel ── */}
       {showScanDispatch&&(
