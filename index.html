@@ -986,7 +986,7 @@ function sendRatingReply(order,stars){
 
 // ── NEW ORDER ──
 const LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBottom:4};
-const emptyItem=()=>({product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",total:"",advance:"",advPayMethod:"Cash",notes:"",needsDesign:false,designType:DESIGN_TYPES[0],designCost:"",oilPolish:false});
+const emptyItem=()=>({product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",total:"",advance:"",advPayMethod:"Cash",notes:"",needsDesign:false,designType:"",designCost:"",oilPolish:false});
 const DRAFT_KEY="hsm_order_draft_v1";
 
 function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
@@ -1067,7 +1067,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
 
   const updItem=(i,k,v)=>setItems(p=>{
     const n=[...p];n[i]={...n[i],[k]:v};
-    if(k==="needsDesign"&&!v){n[i].designCost="";n[i].designType=DESIGN_TYPES[0];n[i].oilPolish=false;}
+    if(k==="needsDesign"&&!v){n[i].designCost="";n[i].designType="";n[i].oilPolish=false;}
     if(k==="advance"||k==="total"||k==="designCost"||k==="needsDesign")n[i].pending=Math.max(0,(Number(n[i].total||0)+(n[i].needsDesign?Number(n[i].designCost||0):0))-Number(n[i].advance||0));
     return n;
   });
@@ -1105,7 +1105,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
       const productTotal=Number(it.total)||0;
       const designCost=it.needsDesign?Number(it.designCost)||0:0;
       const total=productTotal+designCost;
-      const designTypeFull=it.needsDesign?(it.oilPolish?(it.designType+" + Oil Polish"):it.designType):"";
+      const designTypeFull=it.needsDesign?(it.designType&&it.oilPolish?`${it.designType} + Oil Polish`:it.designType||( it.oilPolish?"Oil Polish":"")):"";
       created.push({
         id:genId(),orderNum:i===0?num:null,
         customer,mobile,delivery,
@@ -1277,7 +1277,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
                       <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                         {DESIGN_TYPES.map(d=>(
                           <button key={d} type="button"
-                            onClick={()=>updItem(i,"designType",d)}
+                            onClick={()=>updItem(i,"designType",it.designType===d?"":d)}
                             className="btn"
                             style={{padding:"7px 12px",fontSize:12,flex:1,justifyContent:"center",background:it.designType===d?"#1a1a1a":"#fff",color:it.designType===d?"#fff":"#555",border:`1.5px solid ${it.designType===d?"#1a1a1a":"#ddd"}`}}>
                             {d}
@@ -1299,7 +1299,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
                       <input ref={setRef(`designCost-${i}`)} onKeyDown={onEnter(`designCost-${i}`)} type="number" className="inp" value={it.designCost} onChange={e=>updItem(i,"designCost",e.target.value)} placeholder="0" style={{borderColor:"#ffb74d",background:"#fffaf2",fontWeight:700,color:"#a35a00"}}/>
                     </div>
                     <div style={{background:"#fff3e0",border:"1px solid #ffd9a0",borderRadius:10,padding:"9px 11px",fontSize:12,color:"#a35a00",gridColumn:"span 2"}}>
-                      <div style={{fontWeight:700,marginBottom:3}}>Design: {it.designType}{it.oilPolish?" + Oil Polish (OP)":""}</div>
+                      <div style={{fontWeight:700,marginBottom:3}}>Design: {it.designType&&it.oilPolish?`${it.designType} + Oil Polish (OP)`:it.designType?it.designType:it.oilPolish?"Oil Polish (OP) only":"None selected"}</div>
                       <div>Product {fmtM(Number(it.total||0))} + Design {fmtM(Number(it.designCost||0))} = <b>{fmtM(Number(it.total||0)+Number(it.designCost||0))}</b></div>
                     </div>
                   </>}
@@ -1359,13 +1359,13 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
     delivery:order.delivery||"",
     notes:order.notes||"",
     needsDesign:!!order.needsDesign,
-    designType:order.designType?(order.designType.replace(" + Oil Polish","").replace(" + OP","").split("+")[0].trim())||DESIGN_TYPES[0]:DESIGN_TYPES[0],
+    designType:order.designType?(order.designType.replace(" + Oil Polish","").replace(" + OP","").split("+")[0].trim())||"":""
     designCost:String(designCostOf(order)||""),
     oilPolish:!!(order.oilPolish||(order.designType&&order.designType.includes("Oil Polish"))),
   });
   const upd=(k,v)=>setF(p=>{
     const n={...p,[k]:v};
-    if(k==="needsDesign"&&!v){n.designCost="";n.designType=DESIGN_TYPES[0];n.oilPolish=false;}
+    if(k==="needsDesign"&&!v){n.designCost="";n.designType="";n.oilPolish=false;}
     if(k==="advance"||k==="total"||k==="designCost"||k==="needsDesign") n.pending=Math.max(0,(Number(n.total)||0)+(n.needsDesign?Number(n.designCost||0):0)-(Number(n.advance)||0));
     return n;
   });
@@ -1381,7 +1381,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
     if(String(f.orderNum).trim()!==""&&(!nextNum||nextNum<1)){toast2("Enter a valid order number","err");return;}
     if(nextNum&&orders.some(o=>o.id!==order.id&&o.orderNum===nextNum)){toast2("Order number "+fmtON(nextNum)+" already exists!","err");return;}
     const size=f.dimL+'"x'+f.dimW+'"x'+f.dimT+'"';
-    const designTypeFull=f.needsDesign?(f.oilPolish?(f.designType+" + Oil Polish"):f.designType):"";
+    const designTypeFull=f.needsDesign?(f.designType&&f.oilPolish?`${f.designType} + Oil Polish`:f.designType||(f.oilPolish?"Oil Polish":"")):"";
     onSave(order.id,{
       orderNum:nextNum,customer:f.customer,mobile:f.mobile,product:f.product,wood:f.wood,
       size,qty:Number(f.qty),productTotal,total,advance:Number(f.advance)||0,
@@ -1454,7 +1454,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
                   <div style={{display:"flex",gap:6,flexWrap:"wrap",marginBottom:8}}>
                     {DESIGN_TYPES.map(d=>(
                       <button key={d} type="button"
-                        onClick={()=>upd("designType",d)}
+                        onClick={()=>upd("designType",f.designType===d?"":d)}
                         className="btn"
                         style={{padding:"7px 12px",fontSize:12,flex:1,justifyContent:"center",background:f.designType===d?"#1a1a1a":"#fff",color:f.designType===d?"#fff":"#555",border:`1.5px solid ${f.designType===d?"#1a1a1a":"#ddd"}`}}>
                         {d}
@@ -1474,7 +1474,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
                   <input type="number" className="inp" value={f.designCost} onChange={e=>upd("designCost",e.target.value)} placeholder="0" style={{borderColor:"#ffb74d",background:"#fffaf2",fontWeight:700,color:"#a35a00"}}/>
                 </div>
                 <div style={{background:"#fff3e0",border:"1px solid #ffd9a0",borderRadius:10,padding:"9px 11px",fontSize:12,color:"#a35a00"}}>
-                  <div style={{fontWeight:700,marginBottom:3}}>Design: {f.designType}{f.oilPolish?" + Oil Polish":""}</div>
+                  <div style={{fontWeight:700,marginBottom:3}}>Design: {f.designType&&f.oilPolish?`${f.designType} + Oil Polish`:f.designType?f.designType:f.oilPolish?"Oil Polish (OP) only":"None selected"}</div>
                   <div>{fmtM(productTotal)} + {fmtM(designCost)} = <b>{fmtM(total)}</b></div>
                 </div>
               </>}
