@@ -193,18 +193,19 @@ function printQR(o){
   <style>body{font-family:Arial;padding:20px;background:#fff;text-align:center}
   .box{border:2px solid #cc0000;border-radius:12px;display:inline-block;padding:16px 20px;width:260px}
   .onum{font-size:20px;font-weight:900;color:#cc0000;margin:4px 0 6px}
-  table{width:100%;font-size:12px;text-align:left;border-collapse:collapse}
-  td{padding:4px 6px}td:first-child{color:#888}@media print{body{margin:0}}</style></head>
+  .row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid #f0ede8}
+  .row span:first-child{color:#888}.row span:last-child{font-weight:600}
+  @media print{body{margin:0}}</style></head>
   <body onload="window.print()"><div class="box">
   <div style="font-size:26px;font-weight:900;color:#cc0000">HSM</div>
   <div style="font-size:10px;color:#888;margin-bottom:4px">HANUMAN SAW MILL</div>
   ${o.orderNum?`<div class="onum">Order ${fmtON(o.orderNum)}</div>`:""}
-  <img src="${qr}" width="200" height="200" style="display:block;margin:0 auto 8px;image-rendering:pixelated;"/>
-  <div style="font-size:12px;font-weight:700;color:#888;margin:4px 0">${o.id}</div>
-  <table>
-    <tr><td>Customer</td><td><b>${o.customer}</b></td></tr>
-    <tr><td>Size</td><td>${o.size}</td></tr>
-  </table></div></body></html>`);
+  <img src="${qr}" width="200" height="200" style="display:block;margin:0 auto 10px;image-rendering:pixelated;"/>
+  <div class="row"><span>Customer</span><span>${o.customer}</span></div>
+  <div class="row"><span>Size</span><span>${o.size}</span></div>
+  <div class="row"><span>Product</span><span>${o.product}</span></div>
+  <div class="row" style="border:none"><span>Wood</span><span>${o.wood}</span></div>
+  </div></body></html>`);
   w.document.close();
 }
 
@@ -222,8 +223,12 @@ function printMultiQR(orderList){
       <div class="mill">HANUMAN SAW MILL</div>
       ${o.orderNum?`<div class="onum">Order ${fmtON(o.orderNum)}</div>`:""}
       <img src="${dataUrl}" width="160" height="160" style="display:block;margin:4px auto;image-rendering:pixelated;"/>
-      <div class="oid">${o.id}</div>
-      <table><tr><td>Customer</td><td><b>${o.customer}</b></td></tr><tr><td>Size</td><td>${o.size}</td></tr></table>
+      <table>
+        <tr><td>Customer</td><td><b>${o.customer}</b></td></tr>
+        <tr><td>Size</td><td>${o.size}</td></tr>
+        <tr><td>Product</td><td>${o.product}</td></tr>
+        <tr><td>Wood</td><td>${o.wood}</td></tr>
+      </table>
     </div>`).join("");
   w.document.write(`<!DOCTYPE html><html><head><title>Batch QR Print</title>
   <style>
@@ -611,7 +616,8 @@ function Dashboard({orders,goto,user}){
   ].filter(Boolean);
 
   const stats=[
-    {l:"Total Orders Today",v:todayOrders.length,icon:"ti-clipboard-list",c:"#cc0000"},
+    {l:"Total Orders (All Time)",v:orders.length,icon:"ti-clipboard-list",c:"#cc0000"},
+    {l:"Total Orders Today",v:todayOrders.length,icon:"ti-calendar-plus",c:"#854f0b"},
     {l:"Total Sales Amount",v:fmtM(sales),icon:"ti-currency-rupee",c:"#3b6d11"},
     {l:"Cash Collected",v:fmtM(cashCollected),icon:"ti-cash",c:"#1d9e75"},
     {l:"UPI Collected",v:fmtM(upiCollected),icon:"ti-qrcode",c:"#185fa5"},
@@ -996,7 +1002,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
 
   const [customer,setCustomer]=useState("");
   const [mobile,setMobile]=useState("");
-  const [delivery,setDelivery]=useState("");
+  const [delivery,setDelivery]=useState(todayKey());
   const [orderNumInput,setOrderNumInput]=useState(String(suggestNum));
   const [items,setItems]=useState([emptyItem()]);
   const [done,setDone]=useState(null);
@@ -1010,7 +1016,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
       if(raw){
         const d=JSON.parse(raw);
         if(d.customer||d.mobile||(d.items&&d.items.some(it=>it.dimL||it.qty||it.total))){
-          setCustomer(d.customer||"");setMobile(d.mobile||"");setDelivery(d.delivery||"");
+          setCustomer(d.customer||"");setMobile(d.mobile||"");setDelivery(d.delivery||todayKey());
           if(d.orderNumInput) setOrderNumInput(d.orderNumInput);
           if(d.items&&d.items.length) setItems(d.items.map(it=>({...emptyItem(),...it})));
           toast2("Restored your unsaved order draft");
@@ -1159,7 +1165,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
             </div>
           ))}
         </div>
-        <button className="btn btn-outline" onClick={()=>{setDone(null);setCustomer("");setMobile("");setDelivery("");setOrderNumInput(String(suggestNum+1));setItems([emptyItem()]);clearDraft();}}><i className="ti ti-plus"/>New Order</button>
+        <button className="btn btn-outline" onClick={()=>{setDone(null);setCustomer("");setMobile("");setDelivery(todayKey());setOrderNumInput(String(suggestNum+1));setItems([emptyItem()]);clearDraft();}}><i className="ti ti-plus"/>New Order</button>
       </div>
     </div>
   );
@@ -2485,6 +2491,7 @@ function Reports({orders}){
 
   // ── DAILY TAB ──
   const dayDeli=deli.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===dateSel;});
+  const dayPlaced=orders.filter(o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===dateSel;}); // all orders placed on this day
   const dayRevenue=dayDeli.reduce((a,o)=>a+orderTotalOf(o),0);
   const cashOrders=dayDeli.filter(o=>o.payMethod==="Cash");
   const upiOrders=dayDeli.filter(o=>o.payMethod==="UPI");
@@ -2571,11 +2578,25 @@ function Reports({orders}){
             {dateSel===todayKey()&&<span style={{fontSize:11,color:"#1d9e75",fontWeight:600}}>● Today</span>}
           </div>
 
+          {/* Orders summary row */}
+          <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,marginBottom:16}}>
+            <div className="card" style={{padding:"14px 16px",background:"linear-gradient(135deg,#cc0000,#8b0000)",border:"none"}}>
+              <div style={{fontSize:10.5,color:"rgba(255,255,255,.7)",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:.4}}>Orders Placed</div>
+              <div style={{fontSize:32,fontWeight:900,color:"#fff"}}>{dayPlaced.length}</div>
+              <div style={{fontSize:11.5,color:"rgba(255,255,255,.7)",marginTop:2}}>new orders on this day</div>
+            </div>
+            <div className="card" style={{padding:"14px 16px"}}>
+              <div style={{fontSize:10.5,color:"#bbb",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:.4}}>Orders Delivered</div>
+              <div style={{fontSize:32,fontWeight:900,color:"#0f6e56"}}>{dayDeli.length}</div>
+              <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>completed this day</div>
+            </div>
+          </div>
+
           {/* Daily Sales Revenue — prominent */}
           <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#1d9e75,#0f6e56)",border:"none"}}>
             <div style={{fontSize:11,color:"#d8f5ea",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:.5}}>Daily Sales Revenue</div>
             <div style={{fontSize:34,fontWeight:900,color:"#fff"}}>{fmtM(dayRevenue)}</div>
-            <div style={{fontSize:12,color:"#d8f5ea",marginTop:4}}>{dayDeli.length} order{dayDeli.length===1?"":"s"} delivered</div>
+            <div style={{fontSize:12,color:"#d8f5ea",marginTop:4}}>{dayDeli.length} order{dayDeli.length===1?"":"s"} delivered · {dayPlaced.length} placed</div>
           </div>
 
           {/* Payment Method Breakdown */}
