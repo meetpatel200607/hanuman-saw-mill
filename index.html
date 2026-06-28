@@ -460,7 +460,20 @@ function App(){
     if(!window.db||!user)return;
     setLoading(true);
     const unsub=window.db.collection("orders").orderBy("createdTs","desc").onSnapshot(snap=>{
-      setOrders(snap.docs.map(d=>({...d.data(),id:d.id})));setLoading(false);
+      const docs=snap.docs.map(d=>({...d.data(),id:d.id}));
+      setOrders(docs);
+      setLoading(false);
+      // ── Auto-permanently-delete trash older than 30 days ──
+      if(user.role==="Admin"){
+        const cutoff=Date.now()-30*24*60*60*1000;
+        docs.filter(o=>o.deleted&&o.deletedAt).forEach(o=>{
+          // parse deletedAt (en-IN locale string like "29/6/2026, 10:15:00 am")
+          const parsed=parseLocaleDateMs(o.deletedAt);
+          if(parsed&&parsed<cutoff){
+            window.db.collection("orders").doc(o.id).delete().catch(()=>{});
+          }
+        });
+      }
     },err=>{console.error(err);setLoading(false);});
     return()=>unsub();
   },[user]);
@@ -470,15 +483,32 @@ function App(){
   const toast2=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
 
   const addOrder=async o=>{
+    const h1=makeHistoryEntry("Order Created","Office");
+    // Brief pause to stagger timestamps
+    const h2=makeHistoryEntry("Sent to Factory","Office");
+    const orderWithHistory={...o,history:[h1,h2]};
     if(window.db){
-      try{await window.db.collection("orders").doc(o.id).set({...o,createdTs:firebase.firestore.FieldValue.serverTimestamp()});toast2("Order saved to cloud!");}
+      try{await window.db.collection("orders").doc(o.id).set({...orderWithHistory,createdTs:firebase.firestore.FieldValue.serverTimestamp()});toast2("Order saved to cloud!");}
       catch(e){toast2("Save failed: "+e.message,"err");}
-    }else{setOrders(p=>[o,...p]);toast2("Order created (local only)");}
+    }else{setOrders(p=>[orderWithHistory,...p]);toast2("Order created (local only)");}
   };
 
   const updOrder=async(id,patch)=>{
     if(window.db){try{await window.db.collection("orders").doc(id).update(patch);}catch(e){toast2("Update failed","err");}}
     else setOrders(p=>p.map(o=>o.id===id?{...o,...patch}:o));
+  };
+
+  // updOrderH — same as updOrder but also appends a history entry
+  const updOrderH=async(id,patch,histEntry)=>{
+    if(histEntry){
+      const fullPatch=window.db
+        ?{...patch,history:firebase.firestore.FieldValue.arrayUnion(histEntry)}
+        :{...patch};
+      if(window.db){try{await window.db.collection("orders").doc(id).update(fullPatch);}catch(e){toast2("Update failed","err");}}
+      else setOrders(p=>p.map(o=>o.id===id?{...o,...fullPatch,history:[...(o.history||[]),histEntry]}:o));
+    } else {
+      await updOrder(id,patch);
+    }
   };
 
   const delOrder=async id=>{
@@ -566,11 +596,11 @@ function App(){
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
           {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto}/>}
-          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} delOrder={delOrder} toast2={toast2} user={user}/>}
-          {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
-          {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} toast2={toast2}/>}
-          {page==="receive"&&<Receive orders={activeOrders} updOrder={updOrder} user={user} toast2={toast2}/>}
-          {page==="deliver"&&<Deliver orders={activeOrders} updOrder={updOrder} user={user} toast2={toast2}/>}
+          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} toast2={toast2} user={user}/>}
+          {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
+          {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2}/>}
+          {page==="receive"&&<Receive orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
+          {page==="deliver"&&<Deliver orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={activeOrders}/>}
           {page==="trash"&&user.role==="Admin"&&<Trash orders={trashedOrders} allOrders={orders} restoreOrder={restoreOrder} permanentDeleteOrder={permanentDeleteOrder} toast2={toast2}/>}
         </main>
@@ -812,6 +842,7 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
             <div style={{fontSize:11,color:"#ffb3b3",fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>Admin Safety Area</div>
             <div style={{fontSize:24,fontWeight:900,marginTop:4}}>Trash</div>
             <div style={{fontSize:12,color:"#bbb",marginTop:2}}>{orders.length} trashed order{orders.length===1?"":"s"} · backup includes active and trashed orders</div>
+            <div style={{fontSize:11,color:"#ff8866",marginTop:4}}><i className="ti ti-clock" style={{marginRight:5}}/>Orders in Trash are permanently deleted after 30 days</div>
           </div>
           <button className="btn btn-red" onClick={()=>{exportOrdersBackup(allOrders);toast2("Backup file downloaded");}}><i className="ti ti-download"/>Export Backup</button>
         </div>
@@ -826,7 +857,9 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
 
       <div style={{display:"flex",flexDirection:"column",gap:9}}>
         {filtered.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No trashed orders</div>}
-        {filtered.map(o=>(
+        {filtered.map(o=>{
+          const daysLeft=o.deletedAt?Math.max(0,30-Math.floor((Date.now()-parseLocaleDateMs(o.deletedAt))/(1000*60*60*24))):30;
+          return(
           <div key={o.id} className="card" style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",flexWrap:"wrap",border:"1px solid #eeebe6"}}>
             <div style={{width:44,height:44,background:"#fff0f0",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
               <i className="ti ti-trash" style={{color:"#cc0000",fontSize:19}}/>
@@ -840,13 +873,116 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
               <div style={{fontSize:12,color:"#777"}}>{o.product} · {o.wood} · Qty {o.qty} · {fmtM(orderTotalOf(o))}</div>
               <div style={{fontSize:11,color:"#cc0000",marginTop:3}}>Moved to Trash {o.deletedAt||"—"} by {o.deletedBy||"—"}</div>
               {o.restoredAt&&<div style={{fontSize:11,color:"#1d9e75",marginTop:2}}>Last restored {o.restoredAt} by {o.restoredBy||"—"}</div>}
+              <div style={{fontSize:11,color:daysLeft<=7?"#cc0000":"#999",marginTop:3,fontWeight:daysLeft<=7?700:400}}>
+                <i className="ti ti-clock" style={{marginRight:4}}/>Auto-delete in {daysLeft} day{daysLeft===1?"":"s"}
+              </div>
             </div>
             <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
               <button className="btn btn-green" style={{padding:"7px 12px",fontSize:12}} onClick={()=>setRestoreTarget(o)}><i className="ti ti-restore"/>Restore</button>
               <button className="btn btn-danger" style={{padding:"7px 12px",fontSize:12}} onClick={()=>setPermTarget(o)}><i className="ti ti-alert-triangle"/>Delete Forever</button>
             </div>
           </div>
-        ))}
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── ORDER HISTORY HELPERS ──
+function makeHistoryEntry(action, dept, prevVal, newVal){
+  const now=new Date();
+  const dateStr=now.toLocaleDateString("en-IN",{day:"numeric",month:"short",year:"numeric"});
+  const timeStr=now.toLocaleTimeString("en-IN",{hour:"2-digit",minute:"2-digit",hour12:true}).toUpperCase();
+  const entry={action,dept,date:dateStr,time:timeStr,ts:now.getTime()};
+  if(prevVal!==undefined&&newVal!==undefined) entry.change=`${prevVal} → ${newVal}`;
+  return entry;
+}
+
+async function appendHistory(orderId,entry){
+  if(!window.db) return;
+  try{
+    await window.db.collection("orders").doc(orderId).update({
+      history:firebase.firestore.FieldValue.arrayUnion(entry)
+    });
+  }catch(e){console.error("History append failed",e);}
+}
+
+// ── ORDER HISTORY PANEL ──
+function OrderHistoryPanel({order,onClose}){
+  const [entries,setEntries]=useState([]);
+  useEffect(()=>{
+    if(!order) return;
+    const hist=Array.isArray(order.history)?[...order.history]:[];
+    // Sort newest first
+    hist.sort((a,b)=>(b.ts||0)-(a.ts||0));
+    setEntries(hist);
+  },[order]);
+
+  if(!order) return null;
+
+  const deptColor={
+    "Office":"#185fa5",
+    "Factory":"#854f0b",
+    "Design":"#a35a00",
+    "Delivery":"#1d9e75",
+    "Admin":"#cc0000",
+  };
+
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:1100,display:"flex",alignItems:"flex-end",justifyContent:"center"}} onClick={onClose}>
+      <div style={{background:"#fff",borderRadius:"20px 20px 0 0",width:"100%",maxWidth:540,maxHeight:"85vh",display:"flex",flexDirection:"column",overflow:"hidden",boxShadow:"0 -8px 40px rgba(0,0,0,.18)"}} onClick={e=>e.stopPropagation()}>
+        {/* Header */}
+        <div style={{padding:"16px 20px 12px",borderBottom:"1px solid #f0ede8",display:"flex",justifyContent:"space-between",alignItems:"center",flexShrink:0}}>
+          <div>
+            <div style={{fontWeight:800,fontSize:16,color:"#1a1a1a"}}>Order History</div>
+            <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>
+              {order.orderNum?`Order #${String(order.orderNum).padStart(3,"0")} · `:""}{order.customer}
+            </div>
+          </div>
+          <button onClick={onClose} style={{background:"#f5f5f3",border:"none",borderRadius:9,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#555",fontSize:18}}>
+            <i className="ti ti-x"/>
+          </button>
+        </div>
+        {/* Timeline */}
+        <div style={{flex:1,overflowY:"auto",padding:"16px 20px"}}>
+          {entries.length===0&&(
+            <div style={{textAlign:"center",padding:"40px 0",color:"#bbb"}}>
+              <i className="ti ti-history" style={{fontSize:36,display:"block",marginBottom:10}}/>
+              <div style={{fontSize:13}}>No history recorded yet</div>
+            </div>
+          )}
+          {entries.map((e,i)=>{
+            const dc=deptColor[e.dept]||"#888";
+            return(
+              <div key={i} style={{display:"flex",gap:14,marginBottom:i<entries.length-1?14:0}}>
+                {/* Timeline dot + line */}
+                <div style={{display:"flex",flexDirection:"column",alignItems:"center",flexShrink:0}}>
+                  <div style={{width:28,height:28,borderRadius:"50%",background:dc+"18",border:`2px solid ${dc}`,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                    <i className="ti ti-check" style={{fontSize:13,color:dc}}/>
+                  </div>
+                  {i<entries.length-1&&<div style={{width:2,flex:1,background:"#f0ede8",marginTop:4,minHeight:18}}/>}
+                </div>
+                {/* Content */}
+                <div style={{flex:1,paddingBottom:i<entries.length-1?4:0}}>
+                  <div style={{fontWeight:700,fontSize:13.5,color:"#1a1a1a",marginBottom:3}}>{e.action}</div>
+                  {e.change&&(
+                    <div style={{fontSize:12,background:"#f8f4ff",border:"1px solid #e8dcff",borderRadius:8,padding:"4px 10px",marginBottom:5,color:"#5c3d99",fontWeight:600,display:"inline-block"}}>
+                      {e.change}
+                    </div>
+                  )}
+                  <div style={{display:"flex",flexWrap:"wrap",gap:8,alignItems:"center"}}>
+                    <span style={{fontSize:11,background:dc+"12",color:dc,borderRadius:6,padding:"2px 8px",fontWeight:600}}>
+                      {e.dept}
+                    </span>
+                    <span style={{fontSize:11,color:"#bbb"}}>{e.date}</span>
+                    <span style={{fontSize:11,color:"#bbb"}}>{e.time}</span>
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
       </div>
     </div>
   );
@@ -1510,12 +1646,13 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
 }
 
 // ── ORDER LIST ──
-function OrderList({orders,allOrders,updOrder,delOrder,toast2,user}){
+function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,toast2,user}){
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
   const [sel,setSel]=useState(null);
   const [delTarget,setDelTarget]=useState(null);
   const [editTarget,setEditTarget]=useState(null);
+  const [histOrder,setHistOrder]=useState(null);
 
   const matchQ=(o,q)=>{
     if(!q) return true;
@@ -1532,7 +1669,17 @@ function OrderList({orders,allOrders,updOrder,delOrder,toast2,user}){
       order={editTarget}
       orders={allOrders||orders}
       onSave={(id,patch)=>{
-        updOrder(id,{...patch,lastEditedAt:now2(),lastEditedBy:user.name});
+        const prev=editTarget;
+        // Build a meaningful history action
+        let action="Order Updated";
+        const changes=[];
+        if(patch.customer!==prev.customer) changes.push(`Customer: ${prev.customer} → ${patch.customer}`);
+        if(Number(patch.advance)!==Number(prev.advance)) changes.push(`Advance: ${fmtM(prev.advance)} → ${fmtM(patch.advance)}`);
+        if(Number(patch.total)!==Number(productTotalOf(prev))) changes.push(`Amount: ${fmtM(productTotalOf(prev))} → ${fmtM(patch.productTotal||patch.total)}`);
+        if(patch.delivery!==prev.delivery) changes.push(`Delivery: ${prev.delivery} → ${patch.delivery}`);
+        const h=makeHistoryEntry(action,"Admin",undefined,undefined);
+        if(changes.length) h.change=changes.join(", ");
+        updOrderH(id,{...patch,lastEditedAt:now2(),lastEditedBy:user.name},h);
         toast2("Order updated successfully!");
         setSel({...editTarget,...patch,lastEditedAt:now2(),lastEditedBy:user.name});
         setEditTarget(null);
@@ -1544,6 +1691,7 @@ function OrderList({orders,allOrders,updOrder,delOrder,toast2,user}){
 
   if(sel) return(
     <div style={{maxWidth:560,margin:"0 auto"}}>
+      {histOrder&&<OrderHistoryPanel order={histOrder} onClose={()=>setHistOrder(null)}/>}
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setSel(null)}>← Back</button>
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:8}}>
@@ -1557,6 +1705,7 @@ function OrderList({orders,allOrders,updOrder,delOrder,toast2,user}){
           </div>
           <div style={{display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
             <StatusBadge s={sel.status}/>
+            <button className="btn btn-outline" style={{padding:"5px 10px",fontSize:12}} onClick={()=>setHistOrder(sel)}><i className="ti ti-history"/>History</button>
             {["Admin"].includes(user.role)&&<button className="btn btn-outline" style={{padding:"5px 10px",fontSize:12}} onClick={()=>setEditTarget(sel)}><i className="ti ti-edit"/>Edit</button>}
             <button className="btn btn-danger" style={{padding:"5px 10px",fontSize:12}} onClick={()=>doDelete(sel)}><i className="ti ti-trash"/>Trash</button>
           </div>
@@ -1614,7 +1763,8 @@ function OrderList({orders,allOrders,updOrder,delOrder,toast2,user}){
                 <button className="btn" style={{background:"#25D366",color:"#fff",fontWeight:700,fontSize:13}}
                   onClick={()=>{
                     sendFeedbackRequest(sel);
-                    updOrder(sel.id,{feedbackSent:true,feedbackSentAt:now2()});
+                    const h=makeHistoryEntry("Google Review Request Sent","Delivery");
+                    updOrderH(sel.id,{feedbackSent:true,feedbackSentAt:now2()},h);
                     setSel({...sel,feedbackSent:true,feedbackSentAt:now2()});
                     toast2("Feedback request sent on WhatsApp!");
                   }}>
@@ -1656,6 +1806,7 @@ function OrderList({orders,allOrders,updOrder,delOrder,toast2,user}){
 
   return(
     <div>
+      {histOrder&&<OrderHistoryPanel order={histOrder} onClose={()=>setHistOrder(null)}/>}
       {delTarget&&<DeleteConfirm order={delTarget} onCancel={()=>setDelTarget(null)} onConfirm={()=>{delOrder(delTarget.id);setDelTarget(null);}}/>}
       <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
         <div style={{flex:1,minWidth:180,position:"relative"}}>
@@ -1693,6 +1844,7 @@ function OrderList({orders,allOrders,updOrder,delOrder,toast2,user}){
                 {o.pending>0&&<div style={{fontSize:11,color:"#cc0000"}}>Due: {fmtM(o.pending)}</div>}
               </div>}
               <StatusBadge s={o.status}/>
+              <button className="btn btn-outline" title="View History" style={{padding:"6px 10px",fontSize:12,flexShrink:0}} onClick={e=>{e.stopPropagation();setHistOrder(o);}}><i className="ti ti-history"/></button>
               <button className="btn" style={{padding:"6px 10px",fontSize:12,background:"#25D366",color:"#fff",flexShrink:0}} onClick={e=>{e.stopPropagation();sendWhatsApp(sameOrderGroup(o,orders));updOrder(o.id,{whatsappConfirmationSent:true,whatsappConfirmationSentAt:now2()});toast2("WhatsApp confirmation opened");}}><i className="ti ti-brand-whatsapp"/>Resend</button>
               <button className="btn btn-danger" title="Move to Trash" style={{padding:"6px 10px",fontSize:12,flexShrink:0}} onClick={e=>{e.stopPropagation();doDelete(o);}}><i className="ti ti-trash"/></button>
             </div>
@@ -1743,7 +1895,7 @@ function DispatchModal({order,onConfirm,onCancel,toast2}){
 }
 
 // ── FACTORY ──
-function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
+function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2,goto}){
   const pendAccept=orders.filter(o=>o.status===S.PEND);
   const inProd=orders.filter(o=>o.status===S.PROD);
   const inTransit=orders.filter(o=>o.status===S.TRANSIT);
@@ -1756,9 +1908,18 @@ function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
   const [scanResult,setScanResult]=useState(null); // the matched order after scan
   const [qrSelectMode,setQrSelectMode]=useState(false);
   const [selectedQRIds,setSelectedQRIds]=useState(new Set());
+  const [histOrder,setHistOrder]=useState(null);
 
-  const acceptOrder=o=>{updOrder(o.id,{status:S.PROD,acceptedAt:now2(),acceptedBy:user.name});toast2("Order accepted — now In Production");setSel(null);};
-  const confirmDispatch=o=>{updOrder(o.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name});toast2("Order marked In Transit!");setDispatchTarget(null);setSel(null);};
+  const acceptOrder=o=>{
+    const h=makeHistoryEntry("Accepted","Factory");
+    updOrderH(o.id,{status:S.PROD,acceptedAt:now2(),acceptedBy:user.name},h);
+    toast2("Order accepted — now In Production");setSel(null);
+  };
+  const confirmDispatch=o=>{
+    const h=makeHistoryEntry("Dispatched","Factory");
+    updOrderH(o.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name},h);
+    toast2("Order marked In Transit!");setDispatchTarget(null);setSel(null);
+  };
 
   const onScanDispatch=useCallback(text=>{
     const id=text.trim();
@@ -1783,6 +1944,7 @@ function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
 
   if(sel) return(
     <div style={{maxWidth:440,margin:"0 auto"}}>
+      {histOrder&&<OrderHistoryPanel order={histOrder} onClose={()=>setHistOrder(null)}/>}
       {delTarget&&<DeleteConfirm order={delTarget} onCancel={()=>setDelTarget(null)} onConfirm={()=>{delOrder(delTarget.id);setDelTarget(null);setSel(null);}}/>}
       {dispatchTarget&&<DispatchModal order={dispatchTarget} toast2={toast2} onCancel={()=>setDispatchTarget(null)} onConfirm={()=>confirmDispatch(dispatchTarget)}/>}
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setSel(null)}>← Back</button>
@@ -1805,6 +1967,7 @@ function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
           {sel.status===S.PEND&&<button className="btn btn-green" style={{fontSize:14}} onClick={()=>acceptOrder(sel)}><i className="ti ti-check"/>Accept Order</button>}
           {sel.status===S.PROD&&<button className="btn" style={{background:"#6a1bb5",color:"#fff",fontSize:14}} onClick={()=>setDispatchTarget(sel)}><i className="ti ti-truck"/>Dispatch</button>}
           {sel.status===S.TRANSIT&&<div style={{padding:"10px 16px",background:"#f0e6fb",borderRadius:10,color:"#6a1bb5",fontWeight:600,fontSize:13}}><i className="ti ti-truck" style={{marginRight:6}}/>In Transit since {sel.dispatchedAt}</div>}
+          <button className="btn btn-outline" style={{fontSize:13}} onClick={()=>setHistOrder(sel)}><i className="ti ti-history"/>History</button>
           <button className="btn btn-red" onClick={()=>printQR(sel)}><i className="ti ti-printer"/>Print QR</button>
           <button className="btn btn-danger" onClick={()=>setDelTarget(sel)}><i className="ti ti-trash"/>Trash</button>
         </div>
@@ -1850,7 +2013,8 @@ function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
 
   const doScanDispatch=()=>{
     if(!scanResult) return;
-    updOrder(scanResult.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name});
+    const h=makeHistoryEntry("Dispatched","Factory");
+    updOrderH(scanResult.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name},h);
     toast2("Order "+( scanResult.orderNum?fmtON(scanResult.orderNum):scanResult.id)+" marked In Transit!");
     setScanResult(null);
     setShowScanDispatch(false);
@@ -1956,7 +2120,7 @@ function Factory({orders,allOrders,delOrder,updOrder,user,onAdd,toast2,goto}){
 }
 
 // ── RECEIVE ──
-function Receive({orders,updOrder,user,toast2}){
+function Receive({orders,updOrder,updOrderH,user,toast2}){
   const [found,setFound]=useState(null);
   const [mid,setMid]=useState("");
 
@@ -1976,7 +2140,8 @@ function Receive({orders,updOrder,user,toast2}){
     if(found.status===S.RECV||found.status===S.DELI){toast2("Already received","err");return;}
     if(found.status===S.PEND){toast2("Order not yet accepted by factory","err");return;}
     if(found.status===S.PROD){toast2("Order not yet dispatched from factory","err");return;}
-    updOrder(found.id,{status:S.RECV,receivedAt:now2(),receivedBy:user.name});
+    const h=makeHistoryEntry("Received at Office","Office");
+    updOrderH(found.id,{status:S.RECV,receivedAt:now2(),receivedBy:user.name},h);
     toast2("Marked as Received!");setFound(null);setMid("");
   };
 
@@ -2031,7 +2196,7 @@ function Receive({orders,updOrder,user,toast2}){
 }
 
 // ── DELIVER ──
-function Deliver({orders,updOrder,user,toast2}){
+function Deliver({orders,updOrder,updOrderH,user,toast2}){
   const [found,setFound]=useState(null);
   const [mid,setMid]=useState("");
   const [pm,setPm]=useState("Cash");
@@ -2064,7 +2229,8 @@ function Deliver({orders,updOrder,user,toast2}){
     if(found.status===S.PEND){toast2("Order not yet accepted by factory","err");return;}
     const pendFinal=pt==="full"?0:pt==="partial"?Math.max(0,found.pending-Number(partial)):found.pending;
     const updatedOrder={...found,status:S.DELI,pending:pendFinal,payMethod:pm,payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:loc};
-    updOrder(found.id,{status:S.DELI,pending:pendFinal,payMethod:pm,payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:loc});
+    const h=makeHistoryEntry("Delivered","Delivery");
+    updOrderH(found.id,{status:S.DELI,pending:pendFinal,payMethod:pm,payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:loc},h);
     toast2("Delivered & Paid!");
     setTimeout(()=>printInvoice(updatedOrder),400);
     setJustDelivered(updatedOrder);
@@ -2094,7 +2260,8 @@ function Deliver({orders,updOrder,user,toast2}){
           <button className="btn" style={{background:"#25D366",color:"#fff",fontWeight:700,fontSize:14}}
             onClick={()=>{
               sendFeedbackRequest(justDelivered);
-              updOrder(justDelivered.id,{feedbackSent:true,feedbackSentAt:now2()});
+              const h=makeHistoryEntry("Google Review Request Sent","Delivery");
+              updOrderH(justDelivered.id,{feedbackSent:true,feedbackSentAt:now2()},h);
               toast2("Feedback request sent on WhatsApp!");
               setJustDelivered(null);
             }}>
@@ -2186,13 +2353,17 @@ function Deliver({orders,updOrder,user,toast2}){
 }
 
 // ── DESIGN (orders that need to be sent to the design shop) ──
-function Design({orders,updOrder,toast2}){
+function Design({orders,updOrder,updOrderH,toast2}){
   const [dateSel,setDateSel]=useState(todayKey());
   const flagged=orders.filter(o=>o.needsDesign);
   const pending=flagged.filter(o=>o.designStatus!=="Done");
   const done=flagged.filter(o=>o.designStatus==="Done");
 
-  const markDone=o=>{updOrder(o.id,{designStatus:"Done"});toast2("Marked as design done!");};
+  const markDone=o=>{
+    const h=makeHistoryEntry("Sent to Design","Design");
+    updOrderH(o.id,{designStatus:"Done"},h);
+    toast2("Marked as design done!");
+  };
   const markPending=o=>{updOrder(o.id,{designStatus:"Pending"});toast2("Moved back to pending");};
 
   // ── Today's design collection ──
@@ -2361,6 +2532,15 @@ function parseLocaleDate(str){
   if(bits.length!==3||bits.some(isNaN)) return null;
   const [d,m,y]=bits;
   return {d,m,y,dateKey:`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`,monthKey:`${y}-${String(m).padStart(2,"0")}`,monthLabel:new Date(y,m-1,1).toLocaleDateString("en-IN",{month:"long",year:"numeric"})};
+}
+// Returns milliseconds timestamp for an en-IN locale datetime string
+function parseLocaleDateMs(str){
+  if(!str) return null;
+  const datePart=str.split(",")[0].trim();
+  const bits=datePart.split("/").map(Number);
+  if(bits.length!==3||bits.some(isNaN)) return null;
+  const [d,m,y]=bits;
+  return new Date(y,m-1,d).getTime();
 }
 const todayKey=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
 
