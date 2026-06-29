@@ -52,6 +52,8 @@ if("serviceWorker" in navigator){
   .nav-btn{display:flex;align-items:center;gap:10px;padding:10px 14px;border-radius:10px;cursor:pointer;font-size:13.5px;font-weight:500;color:#888;transition:all .15s;border:none;background:none;width:100%;text-align:left;font-family:inherit;}
   .nav-btn:hover{background:#fff3f3;color:#cc0000}
   .badge{display:inline-block;padding:3px 10px;border-radius:20px;font-size:11.5px;font-weight:600}
+  .size-strong{font-size:17px!important;font-weight:900!important;color:#111!important;letter-spacing:0;background:#f0ede8;border-radius:5px;padding:1px 6px;display:inline-block}
+  .size-strong-sm{font-size:14px!important;font-weight:900!important;color:#111!important;letter-spacing:0;background:#f0ede8;border-radius:4px;padding:0px 5px;display:inline-block}
   @media(max-width:700px){.sidebar{position:fixed;left:-230px;top:0;height:100vh;z-index:200;transition:left .25s}.sidebar.open{left:0}.overlay{display:block!important}}
   @keyframes spin{to{transform:rotate(360deg)}}
 </style>
@@ -97,6 +99,28 @@ const now2=()=>new Date().toLocaleString("en-IN");
 const fmtM=n=>"₹"+Number(n||0).toLocaleString("en-IN");
 const fmtD=d=>d?new Date(d).toLocaleDateString("en-IN"):"—";
 const fmtON=n=>n?"#"+String(n).padStart(3,"0"):"—";
+const orderSuffixForIndex=i=>i>0?String.fromCharCode(65+i):"";
+const orderGroupIndex=(o,orders=[])=>{
+  if(!o) return 0;
+  const gid=o.groupId||o.id;
+  const group=orders.filter(x=>(x.groupId||x.id)===gid).sort((a,b)=>(a.created||"").localeCompare(b.created||"")||String(a.id).localeCompare(String(b.id)));
+  const idx=group.findIndex(x=>x.id===o.id);
+  return idx<0?0:idx;
+};
+const displayOrderNum=(o,orders=[])=>{
+  if(!o) return "—";
+  const base=o.orderNum||sameOrderGroup(o,orders).find(x=>x.orderNum)?.orderNum;
+  if(!base) return o.id||"—";
+  const suffix=o.orderSuffix!==undefined&&o.orderSuffix!==null?o.orderSuffix:orderSuffixForIndex(orderGroupIndex(o,orders));
+  return fmtON(base)+(suffix||"");
+};
+const matchesOrderNumber=(o,text,orders=[])=>{
+  const t=String(text||"").trim().toLowerCase();
+  if(!o||!t||!o.orderNum) return false;
+  const shown=displayOrderNum(o,orders).toLowerCase();
+  const raw=String(o.orderNum).toLowerCase()+String(o.orderSuffix||"").toLowerCase();
+  return String(o.orderNum)===t||fmtON(o.orderNum).toLowerCase()===t||("#"+String(o.orderNum))===t||shown===t||shown.replace("#","")===t||raw===t;
+};
 const designCostOf=o=>Number(o&&o.needsDesign?o.designCost:0)||0;
 const productTotalOf=o=>{
   if(o&&o.productTotal!==undefined&&o.productTotal!==null&&o.productTotal!=="") return Number(o.productTotal)||0;
@@ -136,6 +160,24 @@ const sameOrderGroup=(o,orders)=>{
   const group=orders.filter(x=>(x.groupId||x.id)===gid);
   return group.length?group:[o];
 };
+function normalizeOrderNumbers(list){
+  const groups={};
+  list.forEach(o=>{
+    const gid=o.groupId||o.id;
+    if(!groups[gid]) groups[gid]=[];
+    groups[gid].push(o);
+  });
+  return list.map(o=>{
+    const gid=o.groupId||o.id;
+    const group=(groups[gid]||[o]).slice().sort((a,b)=>(a.created||"").localeCompare(b.created||"")||String(a.id).localeCompare(String(b.id)));
+    const baseHolder=group.find(x=>x.orderNum);
+    const base=baseHolder?baseHolder.orderNum:o.orderNum;
+    const idx=group.findIndex(x=>x.id===o.id);
+    if(!base) return o;
+    const suffix=orderSuffixForIndex(idx<0?0:idx);
+    return {...o,orderNum:base,orderSuffix:o.orderSuffix!==undefined?o.orderSuffix:suffix};
+  });
+}
 
 const SEED=[
   {id:"HSM-DEMO1",orderNum:1,customer:"Ramesh Sharma",mobile:"9876543210",product:"Umbra Patti",wood:"Khair",size:'2"x4"x10',qty:50,advance:5000,pending:7500,total:12500,delivery:"2026-05-20",notes:"Smooth finish",status:S.PEND,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"Cash",payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:""},
@@ -175,7 +217,7 @@ function downloadQR(o){
   ctx.strokeStyle="#cc0000";ctx.lineWidth=3;ctx.beginPath();ctx.roundRect(2,2,W-4,H-4,12);ctx.stroke();
   ctx.fillStyle="#cc0000";ctx.font="bold 22px Arial";ctx.textAlign="center";ctx.fillText("HSM",W/2,26);
   ctx.fillStyle="#999";ctx.font="8px Arial";ctx.fillText("HANUMAN SAW MILL",W/2,38);
-  if(o.orderNum){ctx.fillStyle="#cc0000";ctx.font="bold 17px Arial";ctx.fillText("Order "+fmtON(o.orderNum),W/2,58);}
+  if(o.orderNum){ctx.fillStyle="#cc0000";ctx.font="bold 17px Arial";ctx.fillText("Order "+displayOrderNum(o),W/2,58);}
   const tmp=document.createElement("canvas");
   if(!drawQROnCanvas(tmp,buildQRText(o),size)){alert("QR failed");return;}
   ctx.drawImage(tmp,padX,padTop,size,size);
@@ -195,14 +237,15 @@ function printQR(o){
   .onum{font-size:20px;font-weight:900;color:#cc0000;margin:4px 0 6px}
   .row{display:flex;justify-content:space-between;padding:4px 0;font-size:12px;border-bottom:1px solid #f0ede8}
   .row span:first-child{color:#888}.row span:last-child{font-weight:600}
+  .size-strong{font-size:20px!important;font-weight:900!important;color:#111!important;background:#f0ede8;border-radius:4px;padding:1px 6px}
   @media print{body{margin:0}}</style></head>
   <body onload="window.print()"><div class="box">
   <div style="font-size:26px;font-weight:900;color:#cc0000">HSM</div>
   <div style="font-size:10px;color:#888;margin-bottom:4px">HANUMAN SAW MILL</div>
-  ${o.orderNum?`<div class="onum">Order ${fmtON(o.orderNum)}</div>`:""}
+  ${o.orderNum?`<div class="onum">Order ${displayOrderNum(o)}</div>`:""}
   <img src="${qr}" width="200" height="200" style="display:block;margin:0 auto 10px;image-rendering:pixelated;"/>
   <div class="row"><span>Customer</span><span>${o.customer}</span></div>
-  <div class="row"><span>Size</span><span>${o.size}</span></div>
+  <div class="row"><span>Size</span><span class="size-strong">${o.size}</span></div>
   <div class="row"><span>Product</span><span>${o.product}</span></div>
   <div class="row" style="border:none"><span>Wood</span><span>${o.wood}</span></div>
   </div></body></html>`);
@@ -221,11 +264,11 @@ function printMultiQR(orderList){
     <div class="label">
       <div class="hsm">HSM</div>
       <div class="mill">HANUMAN SAW MILL</div>
-      ${o.orderNum?`<div class="onum">Order ${fmtON(o.orderNum)}</div>`:""}
+      ${o.orderNum?`<div class="onum">Order ${displayOrderNum(o,orderList)}</div>`:""}
       <img src="${dataUrl}" width="160" height="160" style="display:block;margin:4px auto;image-rendering:pixelated;"/>
       <table>
         <tr><td>Customer</td><td><b>${o.customer}</b></td></tr>
-        <tr><td>Size</td><td>${o.size}</td></tr>
+        <tr><td>Size</td><td class="size-strong">${o.size}</td></tr>
         <tr><td>Product</td><td>${o.product}</td></tr>
         <tr><td>Wood</td><td>${o.wood}</td></tr>
       </table>
@@ -242,6 +285,7 @@ function printMultiQR(orderList){
     .oid{font-size:9px;color:#888;margin:3px 0}
     table{width:100%;font-size:9px;text-align:left;border-collapse:collapse}
     td{padding:2px 4px}td:first-child{color:#888}
+    .size-strong{font-size:13px!important;font-weight:900!important;color:#111!important;background:#f0ede8;border-radius:3px;padding:0px 3px}
     @media print{body{margin:0}.grid{gap:6px;padding:8px}}
   </style></head>
   <body onload="window.print()"><div class="grid">${labels}</div></body></html>`);
@@ -266,17 +310,17 @@ function printInvoice(o){
   <style>body{font-family:Arial;padding:32px;color:#111}h1{color:#cc0000;font-size:30px}
   .hdr{display:flex;justify-content:space-between;border-bottom:2px solid #cc0000;padding-bottom:14px;margin-bottom:18px}
   table{width:100%;border-collapse:collapse;font-size:13px}th{background:#cc0000;color:#fff;padding:8px;text-align:left}
-  td{padding:8px;border-bottom:1px solid #eee}.tot{font-weight:700;color:#cc0000}
+  td{padding:8px;border-bottom:1px solid #eee}.tot{font-weight:700;color:#cc0000}.size-strong{font-size:20px!important;font-weight:900!important;color:#111!important;background:#f0ede8;border-radius:4px;padding:1px 6px}
   @media print{body{padding:16px}}</style></head>
   <body onload="window.print()">
   <div class="hdr"><div><h1>HSM</h1><b>Hanuman Saw Mill</b><p style="color:#888;font-size:11px">Wooden Umbra Patti Manufacturers</p></div>
-  <div style="text-align:right">${o.orderNum?`<b>Order ${fmtON(o.orderNum)}</b><br>`:""}
+  <div style="text-align:right">${o.orderNum?`<b>Order ${displayOrderNum(o)}</b><br>`:""}
   <b>INVOICE</b><br>${o.id}<br><span style="color:#888;font-size:12px">${o.deliveredAt||now2()}</span></div></div>
   <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:16px">
   <div><b>Bill To:</b><br>${o.customer}<br>${o.mobile}</div>
   <div style="text-align:right"><b>Payment:</b> ${o.payMethod||"—"}<br><b>Delivery:</b> ${fmtD(o.delivery)}${o.deliveredLocation?`<br><b>Collected:</b> ${o.deliveredLocation}`:""}</div></div>
   <table><thead><tr><th>Product</th><th>Wood</th><th>Size</th><th>Qty</th><th>Total</th></tr></thead>
-  <tbody><tr><td>${o.product}</td><td>${o.wood}</td><td>${o.size}</td><td>${o.qty}</td><td>${fmtM(productTotalOf(o))}</td></tr>
+  <tbody><tr><td>${o.product}</td><td>${o.wood}</td><td class="size-strong">${o.size}</td><td>${o.qty}</td><td>${fmtM(productTotalOf(o))}</td></tr>
   ${o.needsDesign?`<tr><td colspan="4">${o.designType||"Design"} Design Cost</td><td>${fmtM(designCostOf(o))}</td></tr>`:""}</tbody></table>
   <div style="text-align:right;margin-top:16px">
   <table style="width:220px;margin-left:auto;font-size:13px">
@@ -460,25 +504,41 @@ function App(){
     if(!window.db||!user)return;
     setLoading(true);
     const unsub=window.db.collection("orders").orderBy("createdTs","desc").onSnapshot(snap=>{
-      const docs=snap.docs.map(d=>({...d.data(),id:d.id}));
+      const docs=normalizeOrderNumbers(snap.docs.map(d=>({...d.data(),id:d.id})));
       setOrders(docs);
       setLoading(false);
+      const deliveredCutoff=Date.now()-15*24*60*60*1000;
+      docs.filter(o=>o.status===S.DELI&&Number(o.pending||0)===0&&o.deliveredAt).forEach(o=>{
+        const parsed=parseLocaleDateMs(o.deliveredAt);
+        if(parsed&&parsed<deliveredCutoff) window.db.collection("orders").doc(o.id).delete().catch(()=>{});
+      });
       // ── Auto-permanently-delete trash older than 30 days ──
-      if(user.role==="Admin"){
-        const cutoff=Date.now()-30*24*60*60*1000;
-        docs.filter(o=>o.deleted&&o.deletedAt).forEach(o=>{
-          // parse deletedAt (en-IN locale string like "29/6/2026, 10:15:00 am")
-          const parsed=parseLocaleDateMs(o.deletedAt);
-          if(parsed&&parsed<cutoff){
-            window.db.collection("orders").doc(o.id).delete().catch(()=>{});
-          }
-        });
-      }
+      const cutoff=Date.now()-30*24*60*60*1000;
+      docs.filter(o=>o.deleted&&o.deletedAt).forEach(o=>{
+        // parse deletedAt (en-IN locale string like "29/6/2026, 10:15:00 am")
+        const parsed=parseLocaleDateMs(o.deletedAt);
+        if(parsed&&parsed<cutoff){
+          window.db.collection("orders").doc(o.id).delete().catch(()=>{});
+        }
+      });
     },err=>{console.error(err);setLoading(false);});
     return()=>unsub();
   },[user]);
 
-  useEffect(()=>{if(!window.db)setOrders(SEED);},[]);
+  useEffect(()=>{if(!window.db)setOrders(normalizeOrderNumbers(SEED));},[]);
+
+  useEffect(()=>{
+    if(window.db) return;
+    const deliveredCutoff=Date.now()-15*24*60*60*1000;
+    const trashCutoff=Date.now()-30*24*60*60*1000;
+    setOrders(p=>p.filter(o=>{
+      const deliveredMs=parseLocaleDateMs(o.deliveredAt);
+      const deletedMs=parseLocaleDateMs(o.deletedAt);
+      if(o.status===S.DELI&&Number(o.pending||0)===0&&deliveredMs&&deliveredMs<deliveredCutoff) return false;
+      if(o.deleted&&deletedMs&&deletedMs<trashCutoff) return false;
+      return true;
+    }));
+  },[]);
 
   const toast2=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
 
@@ -512,9 +572,28 @@ function App(){
   };
 
   const delOrder=async id=>{
+    if(user.role!=="Admin"){toast2("Only Admin can delete orders","err");return;}
     const patch={deleted:true,deletedAt:now2(),deletedBy:user.name};
     if(window.db){try{await window.db.collection("orders").doc(id).update(patch);toast2("Order moved to Trash");}catch(e){toast2("Move to Trash failed","err");}}
     else{setOrders(p=>p.map(o=>o.id===id?{...o,...patch}:o));toast2("Order moved to Trash");}
+  };
+
+  const bulkDelOrders=async ids=>{
+    if(user.role!=="Admin"){toast2("Only Admin can delete orders","err");return;}
+    const unique=[...new Set(ids)].filter(Boolean);
+    if(!unique.length)return;
+    const patch={deleted:true,deletedAt:now2(),deletedBy:user.name};
+    if(window.db){
+      try{
+        const batch=window.db.batch();
+        unique.forEach(id=>batch.update(window.db.collection("orders").doc(id),patch));
+        await batch.commit();
+        toast2(unique.length+" order"+(unique.length===1?"":"s")+" moved to Trash");
+      }catch(e){toast2("Bulk delete failed","err");}
+    }else{
+      setOrders(p=>p.map(o=>unique.includes(o.id)?{...o,...patch}:o));
+      toast2(unique.length+" order"+(unique.length===1?"":"s")+" moved to Trash");
+    }
   };
 
   const restoreOrder=async id=>{
@@ -596,9 +675,9 @@ function App(){
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
           {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto}/>}
-          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} toast2={toast2} user={user}/>}
+          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user}/>}
           {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
-          {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2}/>}
+          {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2} user={user}/>}
           {page==="receive"&&<Receive orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="deliver"&&<Deliver orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={activeOrders}/>}
@@ -614,6 +693,8 @@ function App(){
 
 // ── DASHBOARD ──
 function Dashboard({orders,goto,user}){
+  const canViewFinancial=["Admin","Accountant"].includes(user.role);
+  const isOfficeOrFactory=["Office Staff","Factory Staff"].includes(user.role);
   const tKey=todayKey();
   const todayOrders=orders.filter(o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===tKey;});
   const todayDelivered=orders.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===tKey;});
@@ -661,7 +742,7 @@ function Dashboard({orders,goto,user}){
   ];
   return(
     <div>
-      {["Admin","Accountant"].includes(user.role)&&(
+      {canViewFinancial&&(
         <div className="card" style={{marginBottom:16,background:"#1a1a1a",border:"none",color:"#fff"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap",marginBottom:16}}>
             <div>
@@ -710,7 +791,7 @@ function Dashboard({orders,goto,user}){
         </div>
       )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
-        {stats.map(s=>(
+        {stats.filter(s=>canViewFinancial||!["Total Sales Amount","Cash Collected","UPI Collected","Other Payments","Average Order Value","Total Orders Today"].includes(s.l)).map(s=>(
           <div key={s.l} className="card" style={{padding:"14px 16px"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
               <div style={{width:32,height:32,borderRadius:9,background:s.c+"18",display:"flex",alignItems:"center",justifyContent:"center"}}><i className={`ti ${s.icon}`} style={{color:s.c,fontSize:16}}/></div>
@@ -720,7 +801,7 @@ function Dashboard({orders,goto,user}){
           </div>
         ))}
       </div>
-      {["Admin","Accountant"].includes(user.role)&&(
+      {canViewFinancial&&(
         <div className="card" style={{marginBottom:16,border:alerts.length?"1.5px solid #ffcccc":"1px solid #eeebe6"}}>
           <div style={{fontWeight:700,fontSize:15,marginBottom:10}}>Important Alerts</div>
           {alerts.length===0
@@ -738,7 +819,7 @@ function Dashboard({orders,goto,user}){
             <thead><tr style={{borderBottom:"1px solid #f0ede8"}}>{["Order #","Date & Time","Customer","Product","Status"].map(h=><th key={h} style={{padding:"8px 10px",textAlign:"left",fontWeight:600,color:"#bbb",fontSize:11}}>{h}</th>)}</tr></thead>
             <tbody>{orders.slice(0,6).map(o=>(
               <tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>
-                <td style={{padding:"9px 10px",fontWeight:900,color:"#cc0000",fontSize:13}}>{fmtON(o.orderNum)}</td>
+                <td style={{padding:"9px 10px",fontWeight:900,color:"#cc0000",fontSize:13}}>{displayOrderNum(o,orders)}</td>
                 <td style={{padding:"9px 10px",fontWeight:600,color:"#888",fontSize:11}}>{orderDateTime(o).label}</td>
                 <td style={{padding:"9px 10px"}}>{o.customer}</td>
                 <td style={{padding:"9px 10px",color:"#777"}}>{o.product}</td>
@@ -753,6 +834,7 @@ function Dashboard({orders,goto,user}){
           {label:"New Order",icon:"ti-plus-circle",page:"new-order",color:"#cc0000",roles:["Admin","Office Staff"]},
           {label:"Scan / Receive",icon:"ti-qrcode",page:"receive",color:"#1d9e75",roles:["Admin","Office Staff"]},
           {label:"Deliver & Pay",icon:"ti-truck-delivery",page:"deliver",color:"#185fa5",roles:["Admin","Office Staff"]},
+          {label:"Factory Deliver",icon:"ti-package-export",page:"factory",color:"#1d9e75",roles:["Factory Staff"]},
           {label:"Reports",icon:"ti-report",page:"reports",color:"#854f0b",roles:["Admin","Accountant"]},
         ].filter(b=>b.roles.includes(user.role)).map(b=>(
           <button key={b.page} onClick={()=>goto(b.page)} style={{background:b.color,color:"#fff",border:"none",borderRadius:13,padding:"16px 14px",cursor:"pointer",display:"flex",alignItems:"center",gap:10,fontSize:13.5,fontWeight:600,fontFamily:"inherit"}}>
@@ -773,7 +855,7 @@ function DeleteConfirm({order,onConfirm,onCancel}){
           <i className="ti ti-trash" style={{fontSize:26,color:"#cc0000"}}/>
         </div>
         <div style={{fontSize:16,fontWeight:700,marginBottom:6}}>Move Order to Trash?</div>
-        <div style={{fontSize:13,color:"#888",marginBottom:4}}>{order.orderNum?`Order ${fmtON(order.orderNum)} · `:""}{order.id}</div>
+        <div style={{fontSize:13,color:"#888",marginBottom:4}}>{order.orderNum?`Order ${displayOrderNum(order)} · `:""}{order.id}</div>
         <div style={{fontSize:14,fontWeight:600,marginBottom:16}}>{order.customer}</div>
         <div style={{fontSize:12,color:"#a35a00",background:"#fff3e0",borderRadius:9,padding:"8px 12px",marginBottom:18}}>This hides the order from normal screens. Admin can restore it from Trash.</div>
         <div style={{display:"flex",gap:10}}>
@@ -793,7 +875,7 @@ function PermanentDeleteConfirm({order,onConfirm,onCancel}){
           <i className="ti ti-alert-triangle" style={{fontSize:26,color:"#cc0000"}}/>
         </div>
         <div style={{fontSize:16,fontWeight:800,marginBottom:6,color:"#cc0000"}}>Permanently Delete?</div>
-        <div style={{fontSize:13,color:"#888",marginBottom:4}}>{order.orderNum?`Order ${fmtON(order.orderNum)} · `:""}{order.id}</div>
+        <div style={{fontSize:13,color:"#888",marginBottom:4}}>{order.orderNum?`Order ${displayOrderNum(order)} · `:""}{order.id}</div>
         <div style={{fontSize:14,fontWeight:600,marginBottom:16}}>{order.customer}</div>
         <div style={{fontSize:12,color:"#cc0000",background:"#fff8f8",borderRadius:9,padding:"8px 12px",marginBottom:18}}>This removes the order forever. Export a backup first if needed.</div>
         <div style={{display:"flex",gap:10}}>
@@ -813,7 +895,7 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
     const t=q.toLowerCase().trim();
     if(!t) return true;
     return (o.customer||"").toLowerCase().includes(t)||(o.mobile||"").includes(t)||(o.id||"").toLowerCase().includes(t)||
-      (o.orderNum&&(String(o.orderNum)===t||fmtON(o.orderNum).toLowerCase()===t||("#"+String(o.orderNum))===t));
+      matchesOrderNumber(o,t,allOrders);
   });
   return(
     <div>
@@ -824,7 +906,7 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
               <i className="ti ti-restore" style={{fontSize:26,color:"#1d9e75"}}/>
             </div>
             <div style={{fontSize:16,fontWeight:700,marginBottom:6}}>Restore Order?</div>
-            <div style={{fontSize:13,color:"#888",marginBottom:4}}>{restoreTarget.orderNum?`Order ${fmtON(restoreTarget.orderNum)} · `:""}{restoreTarget.id}</div>
+            <div style={{fontSize:13,color:"#888",marginBottom:4}}>{restoreTarget.orderNum?`Order ${displayOrderNum(restoreTarget,allOrders)} · `:""}{restoreTarget.id}</div>
             <div style={{fontSize:14,fontWeight:600,marginBottom:16}}>{restoreTarget.customer}</div>
             <div style={{fontSize:12,color:"#0f6e56",background:"#e1f5ee",borderRadius:9,padding:"8px 12px",marginBottom:18}}>This order will return to normal lists, reports, and workflows.</div>
             <div style={{display:"flex",gap:10}}>
@@ -866,7 +948,7 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
             </div>
             <div style={{flex:1,minWidth:0}}>
               <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-                {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:14}}>{fmtON(o.orderNum)}</span>}
+                {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:14}}>{displayOrderNum(o,allOrders)}</span>}
                 <span style={{fontWeight:700,fontSize:14}}>{o.customer}</span>
               </div>
               <div style={{fontSize:11,color:"#aaa"}}>{o.id} · {orderDateTime(o).label}</div>
@@ -937,7 +1019,7 @@ function OrderHistoryPanel({order,onClose}){
           <div>
             <div style={{fontWeight:800,fontSize:16,color:"#1a1a1a"}}>Order History</div>
             <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>
-              {order.orderNum?`Order #${String(order.orderNum).padStart(3,"0")} · `:""}{order.customer}
+              {order.orderNum?`Order ${displayOrderNum(order)} · `:""}{order.customer}
             </div>
           </div>
           <button onClick={onClose} style={{background:"#f5f5f3",border:"none",borderRadius:9,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#555",fontSize:18}}>
@@ -1000,7 +1082,8 @@ function OrderNumberEditor({order,orders,updOrder,user,toast2,onLocalUpdate,comp
     const next=raw===""?null:parseInt(raw,10);
     if(raw!==""&&(!next||next<1)){toast2("Enter a valid order number","err");setVal(order.orderNum?String(order.orderNum):"");return;}
     if(next===order.orderNum){setEditing(false);return;}
-    if(next&&orders.some(o=>o.id!==order.id&&o.orderNum===next)){
+    const gid=order.groupId||order.id;
+    if(next&&orders.some(o=>o.id!==order.id&&o.orderNum===next&&(o.groupId||o.id)!==gid)){
       toast2("Order number "+fmtON(next)+" already exists!","err");
       setVal(order.orderNum?String(order.orderNum):"");
       setEditing(false);
@@ -1013,7 +1096,7 @@ function OrderNumberEditor({order,orders,updOrder,user,toast2,onLocalUpdate,comp
     setEditing(false);
   };
 
-  if(!canEdit) return <span>{fmtON(order.orderNum)}</span>;
+  if(!canEdit) return <span>{displayOrderNum(order,orders)}</span>;
   if(editing) return(
     <input
       className="inp"
@@ -1037,7 +1120,7 @@ function OrderNumberEditor({order,orders,updOrder,user,toast2,onLocalUpdate,comp
       title="Edit order number"
       style={{background:"#fff8f8",border:"1px solid #ffdddd",borderRadius:8,padding:compact?"4px 7px":"6px 10px",cursor:"pointer",color:"#cc0000",fontWeight:900,fontSize:compact?11:15,fontFamily:"inherit",display:"inline-flex",alignItems:"center",gap:5}}
     >
-      {fmtON(order.orderNum)} <i className="ti ti-edit" style={{fontSize:compact?11:13}}/>
+      {displayOrderNum(order,orders)} <i className="ti ti-edit" style={{fontSize:compact?11:13}}/>
     </button>
   );
 }
@@ -1046,7 +1129,7 @@ function OrderNumberEditor({order,orders,updOrder,user,toast2,onLocalUpdate,comp
 function buildWhatsAppOrderMessage(orders_created){
   const o=orders_created[0];
   const itemLines=orders_created.map((it,i)=>
-    `• Item ${i+1}: ${it.product} | ${it.wood} | ${it.size} | Qty: ${it.qty}${it.needsDesign?` | Design: ${it.designType||"Design"} (${fmtM(designCostOf(it))})`:""}`
+    `• ${displayOrderNum(it,orders_created)}: ${it.product} | ${it.wood} | *SIZE: ${it.size}* | Qty: ${it.qty}${it.needsDesign?` | Design: ${it.designType||"Design"} (${fmtM(designCostOf(it))})`:""}`
   ).join("\n");
   const totalAmt=orders_created.reduce((a,x)=>a+orderTotalOf(x),0);
   const advAmt=orders_created.reduce((a,x)=>a+x.advance,0);
@@ -1057,7 +1140,7 @@ function buildWhatsAppOrderMessage(orders_created){
 
 Hello *${(o.customer||"Customer").toUpperCase()}*! Your order has been placed.
 
-📋 *Order No:* ${o.orderNum?fmtON(o.orderNum):"—"}
+📋 *Order No:* ${displayOrderNum(o,orders_created)}
 🗓️ *Order Date:* ${orderDateTime(o).label}
 📦 *Items:*
 ${itemLines}
@@ -1249,7 +1332,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
       const total=productTotal+designCost;
       const designTypeFull=it.needsDesign?(it.designType&&it.oilPolish?`${it.designType} + Oil Polish`:it.designType||( it.oilPolish?"Oil Polish":"")):"";
       created.push({
-        id:genId(),orderNum:i===0?num:null,
+        id:genId(),orderNum:num,orderSuffix:orderSuffixForIndex(i),
         customer,mobile,delivery,
         product:it.product,wood:it.wood,size,qty:Number(it.qty),
         productTotal,total,advance:Number(it.advance)||0,
@@ -1274,7 +1357,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
       <div className="card" style={{textAlign:"center"}}>
         <div style={{width:52,height:52,background:"#e1f5ee",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 10px"}}><i className="ti ti-check" style={{fontSize:26,color:"#1d9e75"}}/></div>
         <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>{done.length>1?`${done.length} Orders Created!`:"Order Created!"}</div>
-        <div style={{fontSize:26,fontWeight:900,color:"#cc0000",marginBottom:2}}>{done[0].orderNum?`Order ${fmtON(done[0].orderNum)}`:done[0].id}</div>
+        <div style={{fontSize:26,fontWeight:900,color:"#cc0000",marginBottom:2}}>{done[0].orderNum?`Order ${displayOrderNum(done[0],done)}`:done[0].id}</div>
         <div style={{fontSize:11,color:"#aaa",marginBottom:16}}>{done[0].customer} · {done[0].mobile}</div>
 
         {/* WhatsApp + Design buttons */}
@@ -1290,8 +1373,8 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
         <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:16}}>
           {done.map((o,i)=>(
             <div key={o.id} style={{background:"#fafaf8",borderRadius:12,padding:12}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#cc0000",marginBottom:4}}>{i===0&&o.orderNum?`Order ${fmtON(o.orderNum)} · `:""}{o.id}</div>
-              <div style={{fontSize:12,color:"#777",marginBottom:8}}>{o.product} · {o.wood} · {o.size} · Qty {o.qty}</div>
+              <div style={{fontSize:12,fontWeight:700,color:"#cc0000",marginBottom:4}}>{o.orderNum?`Order ${displayOrderNum(o,done)} · `:""}{o.id}</div>
+              <div style={{fontSize:12,color:"#777",marginBottom:8}}>{o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b> · Qty {o.qty}</div>
               {o.needsDesign&&<div style={{display:"inline-block",background:"#fff3e0",color:"#a35a00",border:"1px solid #ffd9a0",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,marginBottom:8}}><i className="ti ti-pencil-ruler" style={{marginRight:4}}/>{o.designType||"Design"} · {fmtM(o.designCost)}</div>}
               <div style={{background:"#fff",borderRadius:10,padding:8,display:"inline-block"}}><QRSvg order={o} size={140}/></div>
               <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:8,flexWrap:"wrap"}}>
@@ -1376,8 +1459,8 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
                 {prevOrders.map(o=>(
                   <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12,flexWrap:"wrap",gap:4}}>
                     <div style={{display:"flex",alignItems:"center",gap:8}}>
-                      {o.orderNum&&<span style={{fontWeight:700,color:"#cc0000",minWidth:32}}>{fmtON(o.orderNum)}</span>}
-                      <span style={{color:"#555"}}>{o.product} · {o.wood} · {o.size}</span>
+                      {o.orderNum&&<span style={{fontWeight:700,color:"#cc0000",minWidth:32}}>{displayOrderNum(o,orders)}</span>}
+                      <span style={{color:"#555"}}>{o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b></span>
                     </div>
                     <div style={{display:"flex",alignItems:"center",gap:10}}>
                       <span style={{color:"#bbb"}}>{orderDateTime(o).label}</span>
@@ -1521,7 +1604,8 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
     if(!f.customer||!f.mobile||!f.dimL||!f.dimW||!f.dimT||!f.qty){toast2("Fill all required fields","err");return;}
     const nextNum=String(f.orderNum).trim()===""?null:parseInt(f.orderNum,10);
     if(String(f.orderNum).trim()!==""&&(!nextNum||nextNum<1)){toast2("Enter a valid order number","err");return;}
-    if(nextNum&&orders.some(o=>o.id!==order.id&&o.orderNum===nextNum)){toast2("Order number "+fmtON(nextNum)+" already exists!","err");return;}
+    const gid=order.groupId||order.id;
+    if(nextNum&&orders.some(o=>o.id!==order.id&&o.orderNum===nextNum&&(o.groupId||o.id)!==gid)){toast2("Order number "+fmtON(nextNum)+" already exists!","err");return;}
     const size=f.dimL+'"x'+f.dimW+'"x'+f.dimT+'"';
     const designTypeFull=f.needsDesign?(f.designType&&f.oilPolish?`${f.designType} + Oil Polish`:f.designType||(f.oilPolish?"Oil Polish":"")):"";
     onSave(order.id,{
@@ -1543,7 +1627,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:4,flexWrap:"wrap",gap:8}}>
           <div style={{fontWeight:700,fontSize:15}}>Edit Order</div>
           <div style={{display:"flex",gap:8,alignItems:"center"}}>
-            {order.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:16}}>Order {fmtON(order.orderNum)}</span>}
+            {order.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:16}}>Order {displayOrderNum(order,orders)}</span>}
             <StatusBadge s={order.status}/>
           </div>
         </div>
@@ -1646,19 +1730,21 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
 }
 
 // ── ORDER LIST ──
-function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,toast2,user}){
+function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,toast2,user}){
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
   const [sel,setSel]=useState(null);
   const [delTarget,setDelTarget]=useState(null);
   const [editTarget,setEditTarget]=useState(null);
   const [histOrder,setHistOrder]=useState(null);
+  const [bulkMode,setBulkMode]=useState(false);
+  const [selectedIds,setSelectedIds]=useState(new Set());
+  const isAdmin=user.role==="Admin";
 
   const matchQ=(o,q)=>{
     if(!q) return true;
     const t=q.toLowerCase().trim();
-    return o.customer.toLowerCase().includes(t)||o.mobile.includes(t)||o.id.toLowerCase().includes(t)||
-      (o.orderNum&&(String(o.orderNum)===t||fmtON(o.orderNum).toLowerCase()===t||("#"+String(o.orderNum))===t));
+    return o.customer.toLowerCase().includes(t)||o.mobile.includes(t)||o.id.toLowerCase().includes(t)||matchesOrderNumber(o,t,allOrders||orders);
   };
   const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
   const doDelete=(o)=>{setDelTarget(o);setSel(null);};
@@ -1707,7 +1793,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,toast2,user}){
             <StatusBadge s={sel.status}/>
             <button className="btn btn-outline" style={{padding:"5px 10px",fontSize:12}} onClick={()=>setHistOrder(sel)}><i className="ti ti-history"/>History</button>
             {["Admin"].includes(user.role)&&<button className="btn btn-outline" style={{padding:"5px 10px",fontSize:12}} onClick={()=>setEditTarget(sel)}><i className="ti ti-edit"/>Edit</button>}
-            <button className="btn btn-danger" style={{padding:"5px 10px",fontSize:12}} onClick={()=>doDelete(sel)}><i className="ti ti-trash"/>Trash</button>
+            {isAdmin&&<button className="btn btn-danger" style={{padding:"5px 10px",fontSize:12}} onClick={()=>doDelete(sel)}><i className="ti ti-trash"/>Trash</button>}
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,fontSize:13,marginBottom:18}}>
@@ -1724,7 +1810,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,toast2,user}){
           ].map(([k,v])=>(
             <div key={k} style={{gridColumn:k==="Last Edited"?"span 2":undefined}}>
               <div style={{fontSize:10.5,color:"#bbb",marginBottom:2}}>{k}</div>
-              <div style={{fontWeight:600,fontSize:k==="Last Edited"?11:13,color:k==="Last Edited"?"#bbb":"#1a1a1a"}}>{v}</div>
+              <div className={k==="Size"?"size-strong":""} style={{fontWeight:600,fontSize:k==="Last Edited"?11:13,color:k==="Last Edited"?"#bbb":"#1a1a1a"}}>{v}</div>
             </div>
           ))}
           {sel.notes&&<div style={{gridColumn:"span 2"}}><div style={{fontSize:10.5,color:"#bbb",marginBottom:2}}>Notes</div><div style={{color:"#555",fontSize:12}}>{sel.notes}</div></div>}
@@ -1804,6 +1890,61 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,toast2,user}){
     </div>
   );
 
+  // ── Build grouped order list ──
+  // Primary = order that "owns" the group (has orderNum, or is groupId anchor)
+  // Sub-items = same groupId but not the primary
+  const groupedFiltered=useMemo(()=>{
+    // First get all orders that match the filter/search
+    const matched=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
+    // Also get all orders (unfiltered by search) to find siblings
+    const allActive=orders;
+
+    // Build a map: groupId -> {primary, subs}
+    const groupMap={};
+    allActive.forEach(o=>{
+      const gid=o.groupId||o.id;
+      if(!groupMap[gid]) groupMap[gid]={primary:null,subs:[]};
+      // Primary = the one with orderNum set, or the one whose id===groupId
+      if(o.id===gid||o.orderNum) {
+        if(!groupMap[gid].primary) groupMap[gid].primary=o;
+        else if(o.orderNum&&!groupMap[gid].primary.orderNum) groupMap[gid].primary=o; // prefer one with orderNum
+      } else {
+        groupMap[gid].subs.push(o);
+      }
+    });
+    // Also push primary into subs correctly: some groups have no orderNum on any item
+    // Re-normalise: primary = lowest index item in group (first created)
+    Object.keys(groupMap).forEach(gid=>{
+      const g=groupMap[gid];
+      if(!g.primary){
+        // Fall back: pick first item in group
+        const all=allActive.filter(o=>(o.groupId||o.id)===gid);
+        g.primary=all[0];
+        g.subs=all.slice(1);
+      } else {
+        // Subs = all group members except primary
+        g.subs=allActive.filter(o=>(o.groupId||o.id)===gid&&o.id!==g.primary.id);
+      }
+    });
+
+    // Now produce display list: only show groups where primary or any sub matches the filter
+    const seen=new Set();
+    const result=[];
+    matched.forEach(o=>{
+      const gid=o.groupId||o.id;
+      if(seen.has(gid)) return;
+      seen.add(gid);
+      const g=groupMap[gid]||{primary:o,subs:[]};
+      result.push(g);
+    });
+    // Sort by primary's created desc (newest first)
+    result.sort((a,b)=>(b.primary.created||"").localeCompare(a.primary.created||""));
+    return result;
+  },[orders,q,fl]);
+
+  const [expandedGroups,setExpandedGroups]=useState(new Set());
+  const toggleGroup=gid=>setExpandedGroups(p=>{const n=new Set(p);n.has(gid)?n.delete(gid):n.add(gid);return n;});
+
   return(
     <div>
       {histOrder&&<OrderHistoryPanel order={histOrder} onClose={()=>setHistOrder(null)}/>}
@@ -1821,35 +1962,128 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,toast2,user}){
           <option value={S.RECV}>Received at Office</option>
           <option value={S.DELI}>Delivered & Paid</option>
         </select>
+        {isAdmin&&<button className="btn btn-outline" onClick={()=>{setBulkMode(p=>!p);setSelectedIds(new Set());}}>
+          <i className="ti ti-checkbox"/>{bulkMode?"Cancel Select":"Select Orders"}
+        </button>}
       </div>
-      <div style={{display:"flex",flexDirection:"column",gap:9}}>
-        {filtered.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No orders found</div>}
-        {filtered.map(o=>(
-          <div key={o.id} className="card" style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",flexWrap:"wrap",border:"1px solid #eeebe6"}}>
-            <div onClick={()=>setSel(o)} style={{display:"flex",alignItems:"center",gap:12,flex:1,minWidth:0,cursor:"pointer"}}>
-              <div style={{width:44,height:44,background:"#fff3f3",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
-                <OrderNumberEditor order={o} orders={allOrders||orders} updOrder={updOrder} user={user} toast2={toast2} compact/>
-              </div>
-              <div style={{flex:1,minWidth:0}}>
-                <div style={{fontWeight:600,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.customer}</div>
-                <div style={{fontSize:11,color:"#aaa"}}>{o.id}</div>
-                <div style={{fontSize:11,color:"#aaa"}}>{orderDateTime(o).label}</div>
-                <div style={{fontSize:12,color:"#777"}}>{o.product} · {o.wood} · Qty {o.qty}</div>
-              </div>
-            </div>
-            <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
-              {["Admin","Accountant"].includes(user.role)&&<div style={{textAlign:"right"}}>
-                <div style={{fontWeight:700,fontSize:13}}>{fmtM(orderTotalOf(o))}</div>
-                {o.needsDesign&&<div style={{fontSize:10.5,color:"#a35a00"}}>{o.designType||"Design"} +{fmtM(designCostOf(o))}</div>}
-                {o.pending>0&&<div style={{fontSize:11,color:"#cc0000"}}>Due: {fmtM(o.pending)}</div>}
-              </div>}
-              <StatusBadge s={o.status}/>
-              <button className="btn btn-outline" title="View History" style={{padding:"6px 10px",fontSize:12,flexShrink:0}} onClick={e=>{e.stopPropagation();setHistOrder(o);}}><i className="ti ti-history"/></button>
-              <button className="btn" style={{padding:"6px 10px",fontSize:12,background:"#25D366",color:"#fff",flexShrink:0}} onClick={e=>{e.stopPropagation();sendWhatsApp(sameOrderGroup(o,orders));updOrder(o.id,{whatsappConfirmationSent:true,whatsappConfirmationSentAt:now2()});toast2("WhatsApp confirmation opened");}}><i className="ti ti-brand-whatsapp"/>Resend</button>
-              <button className="btn btn-danger" title="Move to Trash" style={{padding:"6px 10px",fontSize:12,flexShrink:0}} onClick={e=>{e.stopPropagation();doDelete(o);}}><i className="ti ti-trash"/></button>
-            </div>
+      {isAdmin&&bulkMode&&(
+        <div style={{background:"#1a1a1a",borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
+          <div style={{color:"#fff",fontSize:13,fontWeight:700}}>{selectedIds.size} selected</div>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button className="btn btn-outline" style={{fontSize:12,color:"#bbb",borderColor:"#555"}} onClick={()=>setSelectedIds(new Set())}>Clear</button>
+            <button className="btn btn-red" style={{fontSize:13,opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>{bulkDelOrders([...selectedIds]);setSelectedIds(new Set());setBulkMode(false);}}>
+              <i className="ti ti-trash"/>Delete Selected
+            </button>
           </div>
-        ))}
+        </div>
+      )}
+      <div style={{display:"flex",flexDirection:"column",gap:9}}>
+        {groupedFiltered.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No orders found</div>}
+        {groupedFiltered.map(({primary:o,subs})=>{
+          const gid=o.groupId||o.id;
+          const hasMulti=subs.length>0;
+          const isExpanded=expandedGroups.has(gid);
+          const groupTotal=hasMulti?[o,...subs].reduce((a,x)=>a+orderTotalOf(x),0):null;
+          const groupPending=hasMulti?[o,...subs].reduce((a,x)=>a+Number(x.pending||0),0):null;
+          // Determine aggregate status label for multi-item groups
+          const allStatuses=hasMulti?[...new Set([o,...subs].map(x=>x.status))]:null;
+          const mixedStatus=allStatuses&&allStatuses.length>1;
+
+          return(
+            <div key={gid} style={{borderRadius:14,overflow:"hidden",border:hasMulti?(isExpanded?"1.5px solid #cc0000":"1.5px solid #e8d5d5"):"1px solid #eeebe6",background:"#fff",boxShadow:hasMulti?"0 1px 6px rgba(204,0,0,.06)":"none"}}>
+              {/* ── Primary row ── */}
+              <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",flexWrap:"wrap"}}>
+                {isAdmin&&bulkMode&&(
+                  <div onClick={()=>setSelectedIds(p=>{const ids=[o,...subs].map(x=>x.id);const n=new Set(p);const allChosen=ids.every(id=>n.has(id));ids.forEach(id=>allChosen?n.delete(id):n.add(id));return n;})} style={{width:24,height:24,borderRadius:6,border:`2px solid ${[o,...subs].every(x=>selectedIds.has(x.id))?"#cc0000":"#ddd"}`,background:[o,...subs].every(x=>selectedIds.has(x.id))?"#cc0000":"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
+                    {[o,...subs].every(x=>selectedIds.has(x.id))&&<i className="ti ti-check" style={{fontSize:14,color:"#fff"}}/>}
+                  </div>
+                )}
+                <div onClick={()=>setSel(o)} style={{display:"flex",alignItems:"center",gap:12,flex:1,minWidth:0,cursor:"pointer"}}>
+                  <div style={{width:44,height:44,background:"#fff3f3",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,position:"relative"}}>
+                    <OrderNumberEditor order={o} orders={allOrders||orders} updOrder={updOrder} user={user} toast2={toast2} compact/>
+                    {hasMulti&&<div style={{position:"absolute",top:-5,right:-5,background:"#cc0000",color:"#fff",borderRadius:"50%",width:16,height:16,fontSize:9,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{subs.length+1}</div>}
+                  </div>
+                  <div style={{flex:1,minWidth:0}}>
+                    <div style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.customer}</div>
+                    <div style={{fontSize:11,color:"#aaa"}}>{o.id}</div>
+                    <div style={{fontSize:11,color:"#aaa"}}>{orderDateTime(o).label}</div>
+                    <div style={{fontSize:12,color:"#777"}}>
+                      {o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b> · Qty {o.qty}
+                      {hasMulti&&<span style={{marginLeft:6,fontSize:11,color:"#cc0000",fontWeight:600}}>+{subs.length} more size{subs.length>1?"s":""}</span>}
+                    </div>
+                    {isAdmin&&o.status===S.DELI&&o.deliveredAt&&(()=>{const daysLeft=Math.max(0,15-Math.floor((Date.now()-parseLocaleDateMs(o.deliveredAt))/(1000*60*60*24)));return<div style={{fontSize:10,color:daysLeft<=3?"#cc0000":"#bbb",marginTop:2,fontWeight:daysLeft<=3?700:400}}><i className="ti ti-clock" style={{marginRight:3}}/>Auto-delete in {daysLeft} day{daysLeft===1?"":"s"}</div>;})()}
+                  </div>
+                </div>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap"}}>
+                  {["Admin","Accountant"].includes(user.role)&&<div style={{textAlign:"right"}}>
+                    <div style={{fontWeight:700,fontSize:13}}>{hasMulti?fmtM(groupTotal):fmtM(orderTotalOf(o))}</div>
+                    {o.needsDesign&&!hasMulti&&<div style={{fontSize:10.5,color:"#a35a00"}}>{o.designType||"Design"} +{fmtM(designCostOf(o))}</div>}
+                    {(hasMulti?groupPending:o.pending)>0&&<div style={{fontSize:11,color:"#cc0000"}}>Due: {fmtM(hasMulti?groupPending:o.pending)}</div>}
+                  </div>}
+                  {!hasMulti&&<StatusBadge s={o.status}/>}
+                  {hasMulti&&(mixedStatus
+                    ?<span style={{fontSize:11,fontWeight:700,background:"#fff3f3",color:"#cc0000",border:"1px solid #ffcccc",borderRadius:20,padding:"3px 9px"}}>Mixed</span>
+                    :<StatusBadge s={allStatuses[0]}/>
+                  )}
+                  {hasMulti&&(
+                    <button
+                      title={isExpanded?"Collapse items":"Expand items"}
+                      style={{background:isExpanded?"#fff3f3":"#fafaf8",border:`1.5px solid ${isExpanded?"#ffcccc":"#e0ddd8"}`,borderRadius:9,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isExpanded?"#cc0000":"#888",flexShrink:0,transition:"all .15s"}}
+                      onClick={e=>{e.stopPropagation();toggleGroup(gid);}}>
+                      <i className={`ti ${isExpanded?"ti-chevron-up":"ti-chevron-down"}`} style={{fontSize:15}}/>
+                    </button>
+                  )}
+                  <button className="btn btn-outline" title="View History" style={{padding:"6px 10px",fontSize:12,flexShrink:0}} onClick={e=>{e.stopPropagation();setHistOrder(o);}}><i className="ti ti-history"/></button>
+                  <button className="btn" style={{padding:"6px 10px",fontSize:12,background:"#25D366",color:"#fff",flexShrink:0}} onClick={e=>{e.stopPropagation();sendWhatsApp(sameOrderGroup(o,orders));updOrder(o.id,{whatsappConfirmationSent:true,whatsappConfirmationSentAt:now2()});toast2("WhatsApp confirmation opened");}}><i className="ti ti-brand-whatsapp"/>Resend</button>
+                  {isAdmin&&<button className="btn btn-danger" title="Move to Trash" style={{padding:"6px 10px",fontSize:12,flexShrink:0}} onClick={e=>{e.stopPropagation();doDelete(o);}}><i className="ti ti-trash"/></button>}
+                </div>
+              </div>
+
+              {/* ── Sub-items: only shown when expanded ── */}
+              {hasMulti&&isExpanded&&(
+                <div style={{borderTop:"1px solid #f5eeee"}}>
+                  {subs.map((sub,si)=>(
+                    <div key={sub.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 14px 9px 22px",borderBottom:si<subs.length-1?"1px solid #f9f5f5":"none",background:"#fdfafa",flexWrap:"wrap"}}>
+                      {/* indent line */}
+                      <div style={{width:3,height:36,background:"#ffcccc",borderRadius:3,flexShrink:0,marginRight:4}}/>
+                      {isAdmin&&bulkMode&&(
+                        <div onClick={()=>setSelectedIds(p=>{const n=new Set(p);n.has(sub.id)?n.delete(sub.id):n.add(sub.id);return n;})} style={{width:22,height:22,borderRadius:6,border:`2px solid ${selectedIds.has(sub.id)?"#cc0000":"#ddd"}`,background:selectedIds.has(sub.id)?"#cc0000":"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
+                          {selectedIds.has(sub.id)&&<i className="ti ti-check" style={{fontSize:13,color:"#fff"}}/>}
+                        </div>
+                      )}
+                      <div onClick={()=>setSel(sub)} style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0,cursor:"pointer"}}>
+                        <div style={{width:36,height:36,background:"#fff0f0",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:10,color:"#cc0000",fontWeight:700}}>
+                          S{si+2}
+                        </div>
+                        <div style={{flex:1,minWidth:0}}>
+                          <div style={{fontSize:12.5,fontWeight:600,color:"#444"}}>{sub.product} · {sub.wood} · <b className="size-strong-sm">{sub.size}</b></div>
+                          <div style={{fontSize:11,color:"#aaa"}}>{sub.id} · Qty {sub.qty}</div>
+                        </div>
+                      </div>
+                      <div style={{display:"flex",alignItems:"center",gap:7,flexShrink:0,flexWrap:"wrap"}}>
+                        {["Admin","Accountant"].includes(user.role)&&<div style={{textAlign:"right",fontSize:12}}>
+                          <div style={{fontWeight:700,color:"#333"}}>{fmtM(orderTotalOf(sub))}</div>
+                          {sub.pending>0&&<div style={{fontSize:11,color:"#cc0000"}}>Due: {fmtM(sub.pending)}</div>}
+                        </div>}
+                        <StatusBadge s={sub.status}/>
+                        <button className="btn btn-outline" title="View History" style={{padding:"5px 8px",fontSize:11}} onClick={e=>{e.stopPropagation();setHistOrder(sub);}}><i className="ti ti-history"/></button>
+                        {isAdmin&&<button className="btn btn-danger" title="Move to Trash" style={{padding:"5px 8px",fontSize:11}} onClick={e=>{e.stopPropagation();doDelete(sub);}}><i className="ti ti-trash"/></button>}
+                      </div>
+                    </div>
+                  ))}
+                  {/* ── Group summary footer ── */}
+                  {["Admin","Accountant"].includes(user.role)&&(
+                    <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",gap:16,padding:"8px 16px",background:"#fff8f8",borderTop:"1px solid #f5eeee",fontSize:12}}>
+                      <span style={{color:"#888"}}>{subs.length+1} items total</span>
+                      <span style={{fontWeight:700,color:"#333"}}>Group Total: {fmtM(groupTotal)}</span>
+                      {groupPending>0&&<span style={{fontWeight:700,color:"#cc0000"}}>Due: {fmtM(groupPending)}</span>}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
       </div>
     </div>
   );
@@ -1870,10 +2104,10 @@ function DispatchModal({order,onConfirm,onCancel,toast2}){
           <button onClick={onCancel} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
         </div>
         <div style={{background:"#fafaf8",borderRadius:10,padding:12,marginBottom:14}}>
-          {order.orderNum&&<div style={{fontSize:18,fontWeight:900,color:"#cc0000"}}>Order {fmtON(order.orderNum)}</div>}
+          {order.orderNum&&<div style={{fontSize:18,fontWeight:900,color:"#cc0000"}}>Order {displayOrderNum(order)}</div>}
           <div style={{fontSize:13,fontWeight:600}}>{order.customer}</div>
           <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{orderDateTime(order).label}</div>
-          <div style={{fontSize:12,color:"#999"}}>{order.product} · {order.wood} · {order.size} · Qty {order.qty}</div>
+          <div style={{fontSize:12,color:"#999"}}>{order.product} · {order.wood} · <b className="size-strong-sm">{order.size}</b> · Qty {order.qty}</div>
         </div>
         {!scanned?(
           <>
@@ -1910,6 +2144,8 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
   const [selectedQRIds,setSelectedQRIds]=useState(new Set());
   const [histOrder,setHistOrder]=useState(null);
 
+  const [factoryDeliveredOrder,setFactoryDeliveredOrder]=useState(null); // success screen after factory delivery
+
   const acceptOrder=o=>{
     const h=makeHistoryEntry("Accepted","Factory");
     updOrderH(o.id,{status:S.PROD,acceptedAt:now2(),acceptedBy:user.name},h);
@@ -1920,25 +2156,71 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
     updOrderH(o.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name},h);
     toast2("Order marked In Transit!");setDispatchTarget(null);setSel(null);
   };
+  const markFactoryDelivered=o=>{
+    if(o.status===S.DELI){toast2("Already delivered","err");return;}
+    // Auto-accept if still Pending
+    let extraPatch={};
+    if(o.status===S.PEND){extraPatch={acceptedAt:now2(),acceptedBy:user.name};}
+    const h=makeHistoryEntry("Delivered at Factory","Factory");
+    const patch={status:S.DELI,pending:0,payMethod:"Direct Factory Pickup",payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:"At Production",...extraPatch};
+    updOrderH(o.id,patch,h);
+    toast2("Order marked Delivered from Factory");
+    setFactoryDeliveredOrder({...o,...patch});
+    setSel(null);setScanResult(null);setShowScanDispatch(false);
+  };
 
   const onScanDispatch=useCallback(text=>{
     const id=text.trim();
     const o=orders.find(x=>x.id===id);
     if(!o){toast2("QR scanned but order not found","err");return;}
-    if(o.status!==S.PROD){
-      if(o.status===S.PEND) toast2("Order not yet accepted by factory","err");
-      else if(o.status===S.TRANSIT) toast2("Already dispatched","err");
-      else toast2("Order is not in production","err");
-      return;
-    }
     setScanResult(o);
-    toast2("Order found: "+(o.orderNum?fmtON(o.orderNum):o.id));
+    toast2("Order found: "+displayOrderNum(o,orders));
   },[orders,toast2]);
 
   if(showNewOrder) return(
     <div>
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setShowNewOrder(false)}>← Back to Factory View</button>
       <NewOrder user={user} onAdd={onAdd} toast2={toast2} orders={orders} allOrders={allOrders||orders} goto={goto||(()=>setShowNewOrder(false))}/>
+    </div>
+  );
+
+  // ── Factory Delivery Success Screen ──
+  if(factoryDeliveredOrder) return(
+    <div style={{maxWidth:480,margin:"0 auto"}}>
+      <div className="card" style={{textAlign:"center"}}>
+        <div style={{width:52,height:52,background:"#e1f5ee",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 12px"}}>
+          <i className="ti ti-package-export" style={{fontSize:26,color:"#1d9e75"}}/>
+        </div>
+        <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>Delivered from Factory!</div>
+        {factoryDeliveredOrder.orderNum&&<div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>Order {displayOrderNum(factoryDeliveredOrder,orders)}</div>}
+        <div style={{fontSize:13,color:"#999",marginBottom:4}}>{factoryDeliveredOrder.customer} · {factoryDeliveredOrder.mobile}</div>
+        <div style={{fontSize:11,color:"#1d9e75",fontWeight:600,marginBottom:16}}>📍 Collected at Factory — Delivered & Paid</div>
+        <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:18,textAlign:"left",border:"1px solid #eeebe6"}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Order Summary</div>
+          {[["Product",factoryDeliveredOrder.product],["Wood",factoryDeliveredOrder.wood],["Size",factoryDeliveredOrder.size],["Qty",factoryDeliveredOrder.qty],["Delivered At",factoryDeliveredOrder.deliveredAt]].map(([k,v])=>(
+            <div key={k} style={{display:"flex",justifyContent:"space-between",fontSize:12.5,padding:"4px 0",borderBottom:"1px solid #f5f2ee"}}>
+              <span style={{color:"#999"}}>{k}</span>
+              <b className={k==="Size"?"size-strong-sm":""}>{v}</b>
+            </div>
+          ))}
+        </div>
+        <div style={{fontSize:12,color:"#888",marginBottom:10}}>Want to request feedback from this customer?</div>
+        <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
+          <button className="btn" style={{background:"#25D366",color:"#fff",fontWeight:700,fontSize:14}}
+            onClick={()=>{
+              sendFeedbackRequest(factoryDeliveredOrder);
+              const h=makeHistoryEntry("Google Review Request Sent","Factory");
+              updOrderH(factoryDeliveredOrder.id,{feedbackSent:true,feedbackSentAt:now2()},h);
+              toast2("Feedback request sent on WhatsApp!");
+              setFactoryDeliveredOrder(null);
+            }}>
+            <i className="ti ti-brand-whatsapp" style={{fontSize:18}}/>Send Feedback Request
+          </button>
+          <button className="btn btn-outline" onClick={()=>setFactoryDeliveredOrder(null)}>
+            <i className="ti ti-qrcode"/>Scan Next Order
+          </button>
+        </div>
+      </div>
     </div>
   );
 
@@ -1959,17 +2241,18 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
         <div style={{background:"#fafaf8",borderRadius:12,padding:14,display:"inline-block",marginBottom:14}}><QRSvg order={sel}/></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12.5,marginBottom:16,textAlign:"left"}}>
           {[["Product",sel.product],["Wood",sel.wood],["Size",sel.size],["Qty",sel.qty],["Order Date",orderDateTime(sel).date],["Order Time",orderDateTime(sel).time],["Delivery",fmtD(sel.delivery)]].map(([k,v])=>(
-            <div key={k} style={{background:"#fafaf8",borderRadius:9,padding:"9px 11px"}}><div style={{fontSize:10,color:"#bbb"}}>{k}</div><div style={{fontWeight:600}}>{v}</div></div>
+            <div key={k} style={{background:k==="Size"?"#f5f0e8":"#fafaf8",borderRadius:9,padding:"9px 11px",border:k==="Size"?"1.5px solid #d5cfc4":"none",gridColumn:k==="Size"?"span 2":undefined}}><div style={{fontSize:10,color:"#bbb",marginBottom:2}}>{k}</div><div className={k==="Size"?"size-strong":""} style={{fontWeight:600}}>{v}</div></div>
           ))}
           {sel.notes&&<div style={{gridColumn:"span 2",background:"#fff8f8",borderRadius:9,padding:"9px 11px",border:"1px solid #ffe0e0"}}><div style={{fontSize:10,color:"#cc0000",marginBottom:2}}>Notes</div><div style={{fontSize:12}}>{sel.notes}</div></div>}
         </div>
         <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
           {sel.status===S.PEND&&<button className="btn btn-green" style={{fontSize:14}} onClick={()=>acceptOrder(sel)}><i className="ti ti-check"/>Accept Order</button>}
           {sel.status===S.PROD&&<button className="btn" style={{background:"#6a1bb5",color:"#fff",fontSize:14}} onClick={()=>setDispatchTarget(sel)}><i className="ti ti-truck"/>Dispatch</button>}
+          {sel.status!==S.DELI&&<button className="btn btn-green" style={{fontSize:14}} onClick={()=>markFactoryDelivered(sel)}><i className="ti ti-package-export"/>Deliver at Factory{sel.status===S.PEND?" (Auto-Accept)":""}</button>}
           {sel.status===S.TRANSIT&&<div style={{padding:"10px 16px",background:"#f0e6fb",borderRadius:10,color:"#6a1bb5",fontWeight:600,fontSize:13}}><i className="ti ti-truck" style={{marginRight:6}}/>In Transit since {sel.dispatchedAt}</div>}
           <button className="btn btn-outline" style={{fontSize:13}} onClick={()=>setHistOrder(sel)}><i className="ti ti-history"/>History</button>
           <button className="btn btn-red" onClick={()=>printQR(sel)}><i className="ti ti-printer"/>Print QR</button>
-          <button className="btn btn-danger" onClick={()=>setDelTarget(sel)}><i className="ti ti-trash"/>Trash</button>
+          {user.role==="Admin"&&<button className="btn btn-danger" onClick={()=>setDelTarget(sel)}><i className="ti ti-trash"/>Trash</button>}
         </div>
       </div>
     </div>
@@ -1994,7 +2277,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
               <div style={{flex:1,minWidth:0}}>
                 <div style={{fontWeight:700,color:"#1a1a1a",fontSize:14}}>{o.customer}</div>
                 <div style={{fontSize:11,color:"#aaa"}}>{orderDateTime(o).label}</div>
-                <div style={{fontSize:12,color:"#999"}}>{o.product} · {o.wood} · {o.size} · Qty {o.qty}</div>
+                <div style={{fontSize:12,color:"#999"}}>{o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b> · Qty {o.qty}</div>
               </div>
               <div style={{textAlign:"right",marginRight:4,flexShrink:0}}>
                 <div style={{fontSize:11,color:"#bbb"}}>Delivery</div>
@@ -2003,7 +2286,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
               {!qrSelectMode&&renderAction(o)}
-              {!qrSelectMode&&<button className="btn btn-danger" title="Move to Trash" style={{padding:"6px 10px",fontSize:12}} onClick={e=>{e.stopPropagation();setDelTarget(o);}}><i className="ti ti-trash"/></button>}
+              {!qrSelectMode&&user.role==="Admin"&&<button className="btn btn-danger" title="Move to Trash" style={{padding:"6px 10px",fontSize:12}} onClick={e=>{e.stopPropagation();setDelTarget(o);}}><i className="ti ti-trash"/></button>}
             </div>
           </div>
         ))}
@@ -2015,7 +2298,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
     if(!scanResult) return;
     const h=makeHistoryEntry("Dispatched","Factory");
     updOrderH(scanResult.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name},h);
-    toast2("Order "+( scanResult.orderNum?fmtON(scanResult.orderNum):scanResult.id)+" marked In Transit!");
+    toast2("Order "+displayOrderNum(scanResult,orders)+" marked In Transit!");
     setScanResult(null);
     setShowScanDispatch(false);
   };
@@ -2033,8 +2316,8 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
             <i className="ti ti-checkbox"/>
             {qrSelectMode?"Cancel QR Select":"Select QR to Print"}
           </button>
-          <button className="btn" style={{background:"#6a1bb5",color:"#fff"}} onClick={()=>{setShowScanDispatch(p=>!p);setScanResult(null);}}>
-            <i className="ti ti-qrcode"/>Scan to Dispatch
+          <button className="btn" style={{background:"#1d9e75",color:"#fff"}} onClick={()=>{setShowScanDispatch(p=>!p);setScanResult(null);}}>
+            <i className="ti ti-qrcode"/>Scan & Deliver
           </button>
           <button className="btn btn-red" onClick={()=>setShowNewOrder(true)}>
             <i className="ti ti-plus"/>Add New Order
@@ -2053,28 +2336,31 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
         </div>
       )}
 
-      {/* ── Inline Scan-to-Dispatch panel ── */}
+      {/* ── Inline Factory QR scan panel ── */}
       {showScanDispatch&&(
-        <div className="card" style={{marginBottom:18,border:"2px solid #6a1bb5"}}>
+        <div className="card" style={{marginBottom:18,border:"2px solid #1d9e75"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontWeight:700,fontSize:15,color:"#6a1bb5"}}><i className="ti ti-qrcode" style={{marginRight:6}}/>Scan to Dispatch</div>
+            <div>
+              <div style={{fontWeight:700,fontSize:15,color:"#1d9e75"}}><i className="ti ti-qrcode" style={{marginRight:6}}/>Factory Scan & Deliver</div>
+              <div style={{fontSize:11,color:"#888",marginTop:2}}>For customers picking up directly from the factory</div>
+            </div>
             <button onClick={()=>{setShowScanDispatch(false);setScanResult(null);}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
           </div>
 
           {!scanResult?(
             <>
               <div style={{fontSize:12.5,color:"#777",marginBottom:12}}>
-                Point the camera at any <b>In Production</b> order's QR code — it will be detected automatically.
+                Scan the customer's order QR code. You can mark it delivered directly from here — no need to route through the Office.
               </div>
               <QRScanner onResult={onScanDispatch} onError={()=>toast2("Camera error","err")}/>
             </>
           ):(
             <>
               {/* ── Matched order card ── */}
-              <div style={{background:"#f4eeff",border:"1.5px solid #c9a3f5",borderRadius:12,padding:14,marginBottom:14}}>
+              <div style={{background:"#e8f9f2",border:"1.5px solid #7dd8b5",borderRadius:12,padding:14,marginBottom:14}}>
                 <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
                   <div>
-                    <div style={{fontSize:20,fontWeight:900,color:"#6a1bb5",marginBottom:2}}>
+                    <div style={{fontSize:20,fontWeight:900,color:"#0f6e56",marginBottom:2}}>
                       <OrderNumberEditor order={scanResult} orders={orders} updOrder={updOrder} user={user} toast2={toast2} onLocalUpdate={setScanResult}/>
                     </div>
                     <div style={{fontSize:11,color:"#999",marginBottom:4}}>{scanResult.id}</div>
@@ -2085,9 +2371,9 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:12}}>
                   {[["Product",scanResult.product],["Wood",scanResult.wood],["Size",scanResult.size],["Qty",scanResult.qty],["Order Date",orderDateTime(scanResult).date],["Order Time",orderDateTime(scanResult).time],["Delivery",fmtD(scanResult.delivery)]].map(([k,v])=>(
-                    <div key={k} style={{background:"#fff",borderRadius:8,padding:"8px 10px"}}>
+                    <div key={k} style={{background:k==="Size"?"#d9f5ec":"#fff",borderRadius:8,padding:"8px 10px",gridColumn:k==="Size"?"span 3":undefined,border:k==="Size"?"1.5px solid #7dd8b5":"none"}}>
                       <div style={{fontSize:10,color:"#bbb",marginBottom:2}}>{k}</div>
-                      <div style={{fontWeight:700,fontSize:12.5,color:"#1a1a1a"}}>{v}</div>
+                      <div className={k==="Size"?"size-strong":""} style={{fontWeight:700,fontSize:12.5,color:"#1a1a1a"}}>{v}</div>
                     </div>
                   ))}
                 </div>
@@ -2098,9 +2384,14 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
                 <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={()=>{setScanResult(null);}}>
                   <i className="ti ti-arrow-back-up"/>Scan Again
                 </button>
-                <button className="btn" style={{flex:2,justifyContent:"center",background:"#6a1bb5",color:"#fff",fontSize:15}} onClick={doScanDispatch}>
-                  <i className="ti ti-truck"/>Confirm Dispatch — Mark In Transit
-                </button>
+                {scanResult.status===S.PROD&&<button className="btn" style={{flex:1,justifyContent:"center",background:"#6a1bb5",color:"#fff",fontSize:15}} onClick={doScanDispatch}>
+                  <i className="ti ti-truck"/>Mark In Transit
+                </button>}
+                {scanResult.status!==S.DELI&&<button className="btn btn-green" style={{flex:1,justifyContent:"center",fontSize:15,fontWeight:700}} onClick={()=>markFactoryDelivered(scanResult)}>
+                  <i className="ti ti-package-export"/>Mark Delivered{scanResult.status===S.PEND?" (Auto-Accept)":""}
+                </button>}
+                {scanResult.status===S.PEND&&<div style={{flex:2,padding:12,background:"#fff3e0",borderRadius:10,color:"#a35a00",fontWeight:700,textAlign:"center",fontSize:12}}>⚠️ Auto-accept & deliver will run together</div>}
+                {scanResult.status===S.DELI&&<div style={{flex:2,padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:700,textAlign:"center",fontSize:13}}><i className="ti ti-circle-check" style={{marginRight:6}}/>Already Delivered</div>}
               </div>
             </>
           )}
@@ -2126,12 +2417,12 @@ function Receive({orders,updOrder,updOrderH,user,toast2}){
 
   const findByText=useCallback(text=>{
     const t=text.trim();
-    return orders.find(x=>x.id===t||x.mobile===t||(x.orderNum&&(String(x.orderNum)===t||fmtON(x.orderNum)===t||("#"+String(x.orderNum))===t)));
+    return orders.find(x=>x.id===t||x.mobile===t||matchesOrderNumber(x,t,orders));
   },[orders]);
 
   const onScan=useCallback(text=>{
     const o=findByText(text);
-    if(o){setFound(o);toast2("Order found: "+(o.orderNum?fmtON(o.orderNum):o.id));}
+    if(o){setFound(o);toast2("Order found: "+displayOrderNum(o,orders));}
     else toast2("QR scanned but order not found: "+text,"err");
   },[findByText,toast2]);
 
@@ -2177,7 +2468,7 @@ function Receive({orders,updOrder,updOrderH,user,toast2}){
             <div style={{fontSize:13,color:"#999",marginBottom:12}}>{found.mobile}</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12.5}}>
               {[["Product",found.product],["Wood",found.wood],["Size",found.size],["Qty",found.qty],["Order Date",orderDateTime(found).date],["Order Time",orderDateTime(found).time],["Total",fmtM(orderTotalOf(found))],["Pending",fmtM(found.pending)]].map(([k,v])=>(
-                <div key={k}><span style={{color:"#bbb"}}>{k}: </span><b>{v}</b></div>
+                <div key={k} style={{background:k==="Size"?"#f5f0e8":"transparent",borderRadius:k==="Size"?8:0,padding:k==="Size"?"6px 8px":0,gridColumn:k==="Size"?"span 2":undefined,border:k==="Size"?"1.5px solid #d5cfc4":"none"}}><span style={{color:"#bbb"}}>{k}: </span><b className={k==="Size"?"size-strong":""}>{v}</b></div>
               ))}
             </div>
           </div>
@@ -2207,7 +2498,7 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
 
   const findByText=useCallback(text=>{
     const t=text.trim();
-    return orders.find(x=>x.id===t||x.mobile===t||(x.orderNum&&(String(x.orderNum)===t||fmtON(x.orderNum)===t||("#"+String(x.orderNum))===t)));
+    return orders.find(x=>x.id===t||x.mobile===t||matchesOrderNumber(x,t,orders));
   },[orders]);
 
   const onScan=useCallback(text=>{
@@ -2215,7 +2506,7 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
     if(o){
       setFound(o);
       setLoc(o.status===S.RECV||o.status===S.DELI?"At Office":"At Production");
-      toast2("Order found: "+(o.orderNum?fmtON(o.orderNum):o.id));
+      toast2("Order found: "+displayOrderNum(o,orders));
     }
     else toast2("QR scanned but order not found: "+text,"err");
   },[findByText,toast2]);
@@ -2245,7 +2536,7 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
           <i className="ti ti-check" style={{fontSize:26,color:"#1d9e75"}}/>
         </div>
         <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>Order Delivered!</div>
-        {justDelivered.orderNum&&<div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>Order {fmtON(justDelivered.orderNum)}</div>}
+        {justDelivered.orderNum&&<div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>Order {displayOrderNum(justDelivered,orders)}</div>}
         <div style={{fontSize:13,color:"#999",marginBottom:18}}>{justDelivered.customer} · {justDelivered.mobile}</div>
 
         <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:18,textAlign:"left"}}>
@@ -2305,7 +2596,7 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
             <div style={{fontSize:11,color:"#aaa",marginBottom:3}}>{found.id}</div>
             <div style={{fontWeight:700,fontSize:14}}>{found.customer} · {found.mobile}</div>
             <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{orderDateTime(found).label}</div>
-            <div style={{fontSize:12,color:"#777",marginTop:2}}>{found.product} · {found.wood} · {found.size} · Qty {found.qty}</div>
+            <div style={{fontSize:12,color:"#777",marginTop:2}}>{found.product} · {found.wood} · <b className="size-strong-sm">{found.size}</b> · Qty {found.qty}</div>
           </div>
           {found.status===S.PEND&&<div style={{padding:12,background:"#ffe9e9",borderRadius:10,color:"#cc0000",fontWeight:600,fontSize:13,textAlign:"center",marginBottom:13}}>⏳ Order not yet accepted by factory</div>}
           <div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:12,padding:13,marginBottom:13}}>
@@ -2353,7 +2644,8 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
 }
 
 // ── DESIGN (orders that need to be sent to the design shop) ──
-function Design({orders,updOrder,updOrderH,toast2}){
+function Design({orders,updOrder,updOrderH,toast2,user}){
+  const canViewFinancial=["Admin","Accountant"].includes(user.role);
   const [dateSel,setDateSel]=useState(todayKey());
   const flagged=orders.filter(o=>o.needsDesign);
   const pending=flagged.filter(o=>o.designStatus!=="Done");
@@ -2399,16 +2691,16 @@ function Design({orders,updOrder,updOrderH,toast2}){
       </div>
       <div style={{flex:1,minWidth:0}}>
         <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
-          {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:14}}>{fmtON(o.orderNum)}</span>}
+          {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:14}}>{displayOrderNum(o,orders)}</span>}
           <span style={{fontWeight:600,fontSize:14}}>{o.customer}</span>
         </div>
         <div style={{fontSize:11,color:"#aaa"}}>{orderDateTime(o).label}</div>
-        <div style={{fontSize:12,color:"#999"}}>{o.product} · {o.wood} · {o.size} · Qty {o.qty}</div>
-        <div style={{display:"inline-flex",alignItems:"center",gap:6,background:"#fff3e0",color:"#a35a00",border:"1px solid #ffd9a0",borderRadius:8,padding:"4px 9px",fontSize:11.5,fontWeight:700,marginTop:6}}>
+        <div style={{fontSize:12,color:"#999"}}>{o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b> · Qty {o.qty}</div>
+        {canViewFinancial&&<div style={{display:"inline-flex",alignItems:"center",gap:6,background:"#fff3e0",color:"#a35a00",border:"1px solid #ffd9a0",borderRadius:8,padding:"4px 9px",fontSize:11.5,fontWeight:700,marginTop:6}}>
           <span>{o.designType||"Design"}</span><span>·</span>
           <span style={{fontSize:13,color:"#cc6600"}}>{fmtM(designCostOf(o))}</span>
-        </div>
-        <div style={{fontSize:11,color:"#999",marginTop:4}}>Total: {totalFormulaText(o)}</div>
+        </div>}
+        {canViewFinancial&&<div style={{fontSize:11,color:"#999",marginTop:4}}>Total: {totalFormulaText(o)}</div>}
         {o.notes&&<div style={{fontSize:11.5,color:"#a35a00",marginTop:2}}>📝 {o.notes}</div>}
       </div>
       <StatusBadge s={o.status}/>
@@ -2419,7 +2711,7 @@ function Design({orders,updOrder,updOrderH,toast2}){
   return(
     <div>
       {/* ── Today's Design Collection — prominent summary card ── */}
-      <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#a35a00,#cc7a00)",border:"none"}}>
+      {canViewFinancial&&<div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#a35a00,#cc7a00)",border:"none"}}>
         <div style={{fontSize:11,color:"rgba(255,255,255,.7)",fontWeight:700,textTransform:"uppercase",letterSpacing:.6,marginBottom:6}}>Today's Design Collection</div>
         <div style={{fontSize:36,fontWeight:900,color:"#fff",marginBottom:4}}>{fmtM(todayDesignTotal)}</div>
         <div style={{fontSize:12.5,color:"rgba(255,255,255,.8)"}}>{todayDesign.length} design order{todayDesign.length===1?"":"s"} today</div>
@@ -2427,13 +2719,13 @@ function Design({orders,updOrder,updOrderH,toast2}){
           <div style={{marginTop:10,paddingTop:10,borderTop:"1px solid rgba(255,255,255,.2)",display:"flex",flexWrap:"wrap",gap:8}}>
             {todayDesign.map(o=>(
               <div key={o.id} style={{background:"rgba(255,255,255,.15)",borderRadius:8,padding:"4px 10px",fontSize:12}}>
-                <span style={{color:"#fff",fontWeight:700}}>{o.orderNum?fmtON(o.orderNum):o.id}</span>
+                <span style={{color:"#fff",fontWeight:700}}>{o.orderNum?displayOrderNum(o,orders):o.id}</span>
                 <span style={{color:"rgba(255,255,255,.8)"}}> · {o.designType||"Design"} · {fmtM(designCostOf(o))}</span>
               </div>
             ))}
           </div>
         )}
-      </div>
+      </div>}
 
       {/* ── Info banner ── */}
       <div style={{background:"#fff3e0",border:"1px solid #ffd9a0",borderRadius:12,padding:"10px 14px",marginBottom:16,fontSize:12.5,color:"#a35a00"}}>
@@ -2458,7 +2750,7 @@ function Design({orders,updOrder,updOrderH,toast2}){
       </>}
 
       {/* ── Daily Collection History ── */}
-      <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:12}}>Daily Design Collection History</div>
+      {canViewFinancial&&<><div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:12}}>Daily Design Collection History</div>
 
       {/* Date picker to drill into a specific day */}
       <div style={{display:"flex",alignItems:"center",gap:10,marginBottom:14,flexWrap:"wrap"}}>
@@ -2477,7 +2769,7 @@ function Design({orders,updOrder,updOrderH,toast2}){
               {selDesign.map(o=>(
                 <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",fontSize:12.5,padding:"6px 0",borderBottom:"1px solid #faf0e0",flexWrap:"wrap",gap:4}}>
                   <div style={{display:"flex",alignItems:"center",gap:8}}>
-                    {o.orderNum&&<span style={{fontWeight:700,color:"#cc0000"}}>{fmtON(o.orderNum)}</span>}
+                    {o.orderNum&&<span style={{fontWeight:700,color:"#cc0000"}}>{displayOrderNum(o,orders)}</span>}
                     <span style={{color:"#555"}}>{o.customer}</span>
                     <span style={{color:"#bbb"}}>·</span>
                     <span style={{color:"#777"}}>{o.designType||"Design"}</span>
@@ -2519,6 +2811,7 @@ function Design({orders,updOrder,updOrderH,toast2}){
         </div>
       )}
       {history.length===0&&<div style={{textAlign:"center",padding:30,color:"#bbb",background:"#fff",borderRadius:14}}>No design collection history yet</div>}
+      </>}
     </div>
   );
 }
@@ -2612,9 +2905,9 @@ function CustomerTab({orders,custQ,setCustQ}){
                     {c.orders.map((o,i)=>(
                       <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<c.orders.length-1?"1px solid #f5f2ee":"none",flexWrap:"wrap",gap:6}}>
                         <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
-                          {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:13,flexShrink:0}}>{fmtON(o.orderNum)}</span>}
+                          {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:13,flexShrink:0}}>{displayOrderNum(o,orders)}</span>}
                           <div style={{minWidth:0}}>
-                            <div style={{fontSize:12.5,fontWeight:600,color:"#333",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.product} · {o.wood} · {o.size}</div>
+                            <div style={{fontSize:12.5,fontWeight:600,color:"#333",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b></div>
                             <div style={{fontSize:11,color:"#bbb"}}>{orderDateTime(o).label}{o.qty?` · Qty ${o.qty}`:""}</div>
                           </div>
                         </div>
@@ -2650,9 +2943,9 @@ function Reports({orders}){
   const pend=orders.filter(o=>o.status!==S.DELI&&o.pending>0);
   const rated=orders.filter(o=>o.customerRating);
   const tabs=[["daily","Daily Sales"],["monthly","Monthly Reports"],["design","Design Revenue"],["pending","Pending"],["delivered","Delivered"],["customers","Customers"],["feedback","Feedback"]];
-  const labels={orderNum:"Order #",id:"Order ID",customer:"Customer",mobile:"Mobile",product:"Product",wood:"Wood",qty:"Qty",total:"Total",designType:"Design Type",designCost:"Design Cost",advance:"Advance",pending:"Pending",status:"Status",payMethod:"Payment",created:"Order Date & Time",deliveredAt:"Delivered",deliveredLocation:"Location"};
+  const labels={orderNum:"Order #",id:"Order ID",customer:"Customer",mobile:"Mobile",product:"Product",wood:"Wood",size:"Size",qty:"Qty",total:"Total",designType:"Design Type",designCost:"Design Cost",advance:"Advance",pending:"Pending",status:"Status",payMethod:"Payment",created:"Order Date & Time",deliveredAt:"Delivered",deliveredLocation:"Location"};
   const fv=(k,v,o={})=>{
-    if(k==="orderNum") return v?fmtON(v):"—";
+    if(k==="orderNum") return v?displayOrderNum(o,orders):"—";
     if(k==="created") return orderDateTime({created:v}).label;
     if(k==="total") return fmtM(orderTotalOf(o));
     if(k==="designType") return o.needsDesign?(v||"—"):"—";
@@ -2666,7 +2959,7 @@ function Reports({orders}){
     :<div style={{background:"#fff",borderRadius:14,border:"1px solid #eeebe6",overflow:"hidden"}}><div style={{overflowX:"auto"}}>
       <table style={{width:"100%",borderCollapse:"collapse"}}>
         <thead><tr style={{background:"#fafaf8"}}>{cols.map(c=><th key={c} style={{padding:"9px 10px",textAlign:"left",fontWeight:600,color:"#bbb",fontSize:11,borderBottom:"1px solid #eeebe6"}}>{labels[c]||c}</th>)}</tr></thead>
-        <tbody>{rows.map(o=><tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>{cols.map(c=><td key={c} style={{padding:"9px 10px",fontSize:12.5,color:c==="orderNum"?"#cc0000":c==="id"?"#888":c==="pending"&&o.pending>0?"#cc0000":"#333",fontWeight:c==="orderNum"?"700":"400"}}>{fv(c,o[c],o)}</td>)}</tr>)}</tbody>
+        <tbody>{rows.map(o=><tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>{cols.map(c=><td key={c} className={c==="size"?"size-strong-sm":""} style={{padding:"9px 10px",fontSize:c==="size"?14:12.5,fontWeight:c==="size"?900:c==="orderNum"?700:400,color:c==="orderNum"?"#cc0000":c==="id"?"#888":c==="pending"&&o.pending>0?"#cc0000":c==="size"?"#111":"#333"}}>{fv(c,o[c],o)}</td>)}</tr>)}</tbody>
       </table></div></div>;
 
   // ── DAILY TAB ──
@@ -2865,7 +3158,7 @@ function Reports({orders}){
             )}
           </div>
 
-          <Table rows={dayDeli} cols={["orderNum","created","id","customer","product","qty","designType","designCost","total","payMethod","deliveredLocation","deliveredAt"]}/>
+          <Table rows={dayDeli} cols={["orderNum","created","id","customer","product","size","qty","designType","designCost","total","payMethod","deliveredLocation","deliveredAt"]}/>
         </div>
       )}
 
@@ -2932,11 +3225,11 @@ function Reports({orders}){
           <div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:12,padding:"11px 16px",marginBottom:14,fontWeight:700,color:"#cc0000",fontSize:14}}>
             Total Pending: {fmtM(pend.reduce((a,o)=>a+o.pending,0))}
           </div>
-          <Table rows={pend} cols={["orderNum","created","id","customer","mobile","designType","designCost","total","advance","pending","status"]}/>
+          <Table rows={pend} cols={["orderNum","created","id","customer","mobile","size","designType","designCost","total","advance","pending","status"]}/>
         </div>
       )}
 
-      {tab==="delivered"&&<Table rows={deli} cols={["orderNum","created","id","customer","product","wood","qty","designType","designCost","total","payMethod","deliveredLocation","deliveredAt"]}/>}
+      {tab==="delivered"&&<Table rows={deli} cols={["orderNum","created","id","customer","product","wood","size","qty","designType","designCost","total","payMethod","deliveredLocation","deliveredAt"]}/>}
 
       {tab==="customers"&&(
         <CustomerTab orders={orders} custQ={custQ} setCustQ={setCustQ}/>
@@ -3057,7 +3350,7 @@ function DesignRevenueTab({orders}){
             <tbody>
               {filtered.map(o=>(
                 <tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>
-                  <td style={{padding:"9px 10px",fontWeight:900,color:"#cc0000"}}>{fmtON(o.orderNum)}</td>
+                  <td style={{padding:"9px 10px",fontWeight:900,color:"#cc0000"}}>{displayOrderNum(o,orders)}</td>
                   <td style={{padding:"9px 10px",fontWeight:600}}>{o.customer}</td>
                   <td style={{padding:"9px 10px",color:"#a35a00",fontWeight:600}}>{o.designType||"—"}</td>
                   <td style={{padding:"9px 10px",fontWeight:700,color:"#cc6600"}}>{fmtM(designCostOf(o))}</td>
@@ -3146,7 +3439,7 @@ function FeedbackTab({orders,rated}){
           <div key={o.id} className="card" style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
             <div>
               <div style={{fontWeight:600,fontSize:13}}>{o.customer}</div>
-              <div style={{fontSize:11,color:"#bbb"}}>{o.orderNum?fmtON(o.orderNum)+" · ":""}{o.product}</div>
+              <div style={{fontSize:11,color:"#bbb"}}>{o.orderNum?displayOrderNum(o,orders)+" · ":""}{o.product}</div>
               {o.customerReviewText&&<div style={{fontSize:12,color:"#777",marginTop:3,fontStyle:"italic"}}>"{o.customerReviewText}"</div>}
             </div>
             <div style={{fontSize:16}}>{"⭐".repeat(o.customerRating)}</div>
