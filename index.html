@@ -1739,15 +1739,70 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   const [histOrder,setHistOrder]=useState(null);
   const [bulkMode,setBulkMode]=useState(false);
   const [selectedIds,setSelectedIds]=useState(new Set());
+  const [expandedGroups,setExpandedGroups]=useState(new Set());
   const isAdmin=user.role==="Admin";
 
   const matchQ=(o,q)=>{
     if(!q) return true;
     const t=q.toLowerCase().trim();
-    return o.customer.toLowerCase().includes(t)||o.mobile.includes(t)||o.id.toLowerCase().includes(t)||matchesOrderNumber(o,t,allOrders||orders);
+    return String(o.customer||"").toLowerCase().includes(t)||String(o.mobile||"").includes(t)||String(o.id||"").toLowerCase().includes(t)||matchesOrderNumber(o,t,allOrders||orders);
   };
   const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
   const doDelete=(o)=>{setDelTarget(o);setSel(null);};
+
+  // ── Build grouped order list ──
+  // Primary = order that "owns" the group (has orderNum, or is groupId anchor)
+  // Sub-items = same groupId but not the primary
+  const groupedFiltered=useMemo(()=>{
+    // First get all orders that match the filter/search
+    const matched=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
+    // Also get all orders (unfiltered by search) to find siblings
+    const allActive=orders;
+
+    // Build a map: groupId -> {primary, subs}
+    const groupMap={};
+    allActive.forEach(o=>{
+      const gid=o.groupId||o.id;
+      if(!groupMap[gid]) groupMap[gid]={primary:null,subs:[]};
+      // Primary = the one with orderNum set, or the one whose id===groupId
+      if(o.id===gid||o.orderNum) {
+        if(!groupMap[gid].primary) groupMap[gid].primary=o;
+        else if(o.orderNum&&!groupMap[gid].primary.orderNum) groupMap[gid].primary=o; // prefer one with orderNum
+      } else {
+        groupMap[gid].subs.push(o);
+      }
+    });
+    // Also push primary into subs correctly: some groups have no orderNum on any item
+    // Re-normalise: primary = lowest index item in group (first created)
+    Object.keys(groupMap).forEach(gid=>{
+      const g=groupMap[gid];
+      if(!g.primary){
+        // Fall back: pick first item in group
+        const all=allActive.filter(o=>(o.groupId||o.id)===gid);
+        g.primary=all[0];
+        g.subs=all.slice(1);
+      } else {
+        // Subs = all group members except primary
+        g.subs=allActive.filter(o=>(o.groupId||o.id)===gid&&o.id!==g.primary.id);
+      }
+    });
+
+    // Now produce display list: only show groups where primary or any sub matches the filter
+    const seen=new Set();
+    const result=[];
+    matched.forEach(o=>{
+      const gid=o.groupId||o.id;
+      if(seen.has(gid)) return;
+      seen.add(gid);
+      const g=groupMap[gid]||{primary:o,subs:[]};
+      result.push(g);
+    });
+    // Sort by primary's created desc (newest first)
+    result.sort((a,b)=>(b.primary.created||"").localeCompare(a.primary.created||""));
+    return result;
+  },[orders,q,fl]);
+
+  const toggleGroup=gid=>setExpandedGroups(p=>{const n=new Set(p);n.has(gid)?n.delete(gid):n.add(gid);return n;});
 
   // ── EDIT VIEW ──
   if(editTarget) return(
@@ -1785,9 +1840,9 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
             <div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>
               <OrderNumberEditor order={sel} orders={allOrders||orders} updOrder={updOrder} user={user} toast2={toast2} onLocalUpdate={setSel}/>
             </div>
-            <div style={{fontSize:12,color:"#aaa",marginBottom:2}}>{sel.id}</div>
-            <div style={{fontSize:17,fontWeight:700}}>{sel.customer}</div>
-            <div style={{fontSize:13,color:"#999"}}>{sel.mobile}</div>
+            <div style={{fontSize:12,color:"#aaa",marginBottom:2}}>{sel.id||"—"}</div>
+            <div style={{fontSize:17,fontWeight:700}}>{sel.customer||"—"}</div>
+            <div style={{fontSize:13,color:"#999"}}>{sel.mobile||"—"}</div>
           </div>
           <div style={{display:"flex",gap:8,alignItems:"flex-start",flexWrap:"wrap"}}>
             <StatusBadge s={sel.status}/>
@@ -1797,7 +1852,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
           </div>
         </div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12,fontSize:13,marginBottom:18}}>
-          {[["Product",sel.product],["Wood",sel.wood],["Size",sel.size],["Quantity",sel.qty],
+          {[["Product",sel.product||"—"],["Wood",sel.wood||"—"],["Size",sel.size||"—"],["Quantity",sel.qty||"—"],
             ["Order Date",orderDateTime(sel).date],["Order Time",orderDateTime(sel).time],
             ...(["Admin","Accountant"].includes(user.role)?[
               ["Product Amount",fmtM(productTotalOf(sel))],
@@ -1889,61 +1944,6 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
       {delTarget&&<DeleteConfirm order={delTarget} onCancel={()=>setDelTarget(null)} onConfirm={()=>{delOrder(delTarget.id);setDelTarget(null);setSel(null);}}/>}
     </div>
   );
-
-  // ── Build grouped order list ──
-  // Primary = order that "owns" the group (has orderNum, or is groupId anchor)
-  // Sub-items = same groupId but not the primary
-  const groupedFiltered=useMemo(()=>{
-    // First get all orders that match the filter/search
-    const matched=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
-    // Also get all orders (unfiltered by search) to find siblings
-    const allActive=orders;
-
-    // Build a map: groupId -> {primary, subs}
-    const groupMap={};
-    allActive.forEach(o=>{
-      const gid=o.groupId||o.id;
-      if(!groupMap[gid]) groupMap[gid]={primary:null,subs:[]};
-      // Primary = the one with orderNum set, or the one whose id===groupId
-      if(o.id===gid||o.orderNum) {
-        if(!groupMap[gid].primary) groupMap[gid].primary=o;
-        else if(o.orderNum&&!groupMap[gid].primary.orderNum) groupMap[gid].primary=o; // prefer one with orderNum
-      } else {
-        groupMap[gid].subs.push(o);
-      }
-    });
-    // Also push primary into subs correctly: some groups have no orderNum on any item
-    // Re-normalise: primary = lowest index item in group (first created)
-    Object.keys(groupMap).forEach(gid=>{
-      const g=groupMap[gid];
-      if(!g.primary){
-        // Fall back: pick first item in group
-        const all=allActive.filter(o=>(o.groupId||o.id)===gid);
-        g.primary=all[0];
-        g.subs=all.slice(1);
-      } else {
-        // Subs = all group members except primary
-        g.subs=allActive.filter(o=>(o.groupId||o.id)===gid&&o.id!==g.primary.id);
-      }
-    });
-
-    // Now produce display list: only show groups where primary or any sub matches the filter
-    const seen=new Set();
-    const result=[];
-    matched.forEach(o=>{
-      const gid=o.groupId||o.id;
-      if(seen.has(gid)) return;
-      seen.add(gid);
-      const g=groupMap[gid]||{primary:o,subs:[]};
-      result.push(g);
-    });
-    // Sort by primary's created desc (newest first)
-    result.sort((a,b)=>(b.primary.created||"").localeCompare(a.primary.created||""));
-    return result;
-  },[orders,q,fl]);
-
-  const [expandedGroups,setExpandedGroups]=useState(new Set());
-  const toggleGroup=gid=>setExpandedGroups(p=>{const n=new Set(p);n.has(gid)?n.delete(gid):n.add(gid);return n;});
 
   return(
     <div>
@@ -2234,13 +2234,13 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
         <div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>
           <OrderNumberEditor order={sel} orders={orders} updOrder={updOrder} user={user} toast2={toast2} onLocalUpdate={setSel}/>
         </div>
-        <div style={{fontSize:12,color:"#aaa",marginBottom:4}}>{sel.id}</div>
-        <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>{sel.customer}</div>
-        <div style={{fontSize:13,color:"#999",marginBottom:10}}>{sel.mobile}</div>
+        <div style={{fontSize:12,color:"#aaa",marginBottom:4}}>{sel.id||"—"}</div>
+        <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>{sel.customer||"—"}</div>
+        <div style={{fontSize:13,color:"#999",marginBottom:10}}>{sel.mobile||"—"}</div>
         <div style={{marginBottom:14}}><StatusBadge s={sel.status}/></div>
         <div style={{background:"#fafaf8",borderRadius:12,padding:14,display:"inline-block",marginBottom:14}}><QRSvg order={sel}/></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12.5,marginBottom:16,textAlign:"left"}}>
-          {[["Product",sel.product],["Wood",sel.wood],["Size",sel.size],["Qty",sel.qty],["Order Date",orderDateTime(sel).date],["Order Time",orderDateTime(sel).time],["Delivery",fmtD(sel.delivery)]].map(([k,v])=>(
+          {[["Product",sel.product||"—"],["Wood",sel.wood||"—"],["Size",sel.size||"—"],["Qty",sel.qty||"—"],["Order Date",orderDateTime(sel).date],["Order Time",orderDateTime(sel).time],["Delivery",fmtD(sel.delivery)]].map(([k,v])=>(
             <div key={k} style={{background:k==="Size"?"#f5f0e8":"#fafaf8",borderRadius:9,padding:"9px 11px",border:k==="Size"?"1.5px solid #d5cfc4":"none",gridColumn:k==="Size"?"span 2":undefined}}><div style={{fontSize:10,color:"#bbb",marginBottom:2}}>{k}</div><div className={k==="Size"?"size-strong":""} style={{fontWeight:600}}>{v}</div></div>
           ))}
           {sel.notes&&<div style={{gridColumn:"span 2",background:"#fff8f8",borderRadius:9,padding:"9px 11px",border:"1px solid #ffe0e0"}}><div style={{fontSize:10,color:"#cc0000",marginBottom:2}}>Notes</div><div style={{fontSize:12}}>{sel.notes}</div></div>}
