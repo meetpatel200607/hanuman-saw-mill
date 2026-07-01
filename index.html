@@ -3156,6 +3156,10 @@ function Reports({orders}){
   // Total cash in hand = final cash payments + advance cash received today
   const totalCashInHand=cashTotal+dayAdvCash;
 
+  // Outstanding amount for this day (orders placed on this day that still have a pending balance)
+  const dayOutstandingOrders=dayPlaced.filter(o=>o.pending>0);
+  const dayOutstanding=dayOutstandingOrders.reduce((a,o)=>a+Number(o.pending),0);
+
   // ── Cash Tally (per-date, stored in localStorage) ──
   useEffect(()=>{
     try{
@@ -3184,7 +3188,7 @@ function Reports({orders}){
   deli.forEach(o=>{
     const p=parseLocaleDate(o.deliveredAt);
     if(!p) return;
-    if(!monthMap[p.monthKey]) monthMap[p.monthKey]={label:p.monthLabel,orders:[],revenue:0,cashCount:0,cashTotal:0,upiCount:0,upiTotal:0,office:0,production:0,advCash:0,advUPI:0};
+    if(!monthMap[p.monthKey]) monthMap[p.monthKey]={label:p.monthLabel,orders:[],revenue:0,cashCount:0,cashTotal:0,upiCount:0,upiTotal:0,office:0,production:0,advCash:0,advUPI:0,outstanding:0};
     const m=monthMap[p.monthKey];
     m.orders.push(o);m.revenue+=orderTotalOf(o);
     if(o.payMethod==="Cash"){m.cashCount++;m.cashTotal+=orderTotalOf(o);}
@@ -3200,6 +3204,14 @@ function Reports({orders}){
     if(!monthMap[p.monthKey]) return; // only track advances for months that have deliveries
     if(o.advPayMethod==="Cash"||!o.advPayMethod) monthMap[p.monthKey].advCash+=Number(o.advance)||0;
     if(o.advPayMethod==="UPI") monthMap[p.monthKey].advUPI+=Number(o.advance)||0;
+  });
+  // Outstanding amount for each month (orders placed that month that still have a pending balance)
+  orders.forEach(o=>{
+    if(!(o.pending>0)||!o.created) return;
+    const p=parseLocaleDate(o.created);
+    if(!p) return;
+    if(!monthMap[p.monthKey]) return; // only track outstanding for months that have deliveries
+    monthMap[p.monthKey].outstanding+=Number(o.pending)||0;
   });
   const months=Object.entries(monthMap).sort((a,b)=>b[0].localeCompare(a[0]));
 
@@ -3245,6 +3257,13 @@ function Reports({orders}){
             <div style={{fontSize:11,color:"#d8f5ea",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:.5}}>Daily Sales Revenue</div>
             <div style={{fontSize:34,fontWeight:900,color:"#fff"}}>{fmtM(dayRevenue)}</div>
             <div style={{fontSize:12,color:"#d8f5ea",marginTop:4}}>{dayDeli.length} order{dayDeli.length===1?"":"s"} delivered · {dayPlaced.length} placed</div>
+          </div>
+
+          {/* Outstanding Amount for this day */}
+          <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#e6482e,#cc0000)",border:"none"}}>
+            <div style={{fontSize:11,color:"#ffe0da",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:.5}}>Outstanding Amount</div>
+            <div style={{fontSize:34,fontWeight:900,color:"#fff"}}>{fmtM(dayOutstanding)}</div>
+            <div style={{fontSize:12,color:"#ffe0da",marginTop:4}}>{dayOutstandingOrders.length} order{dayOutstandingOrders.length===1?"":"s"} still pending from this day</div>
           </div>
 
           {/* Payment Method Breakdown */}
@@ -3373,6 +3392,7 @@ function Reports({orders}){
                     ["UPI (Final)",`${m.upiCount} · ${fmtM(m.upiTotal)}`,"#185fa5","ti-qrcode"],
                     ["At Office",m.office,"#0f6e56","ti-building-store"],
                     ["At Production",m.production,"#854f0b","ti-tool"],
+                    ["Outstanding",fmtM(m.outstanding),"#cc0000","ti-alert-circle"],
                   ].map(([l,v,c,icon])=>(
                     <div key={l} style={{background:"#fafaf8",borderRadius:10,padding:"10px 12px"}}>
                       <div style={{display:"flex",alignItems:"center",gap:5,marginBottom:3}}><i className={`ti ${icon}`} style={{color:c,fontSize:12}}/><div style={{fontSize:10,color:"#bbb"}}>{l}</div></div>
