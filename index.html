@@ -89,6 +89,7 @@ const PAY_M=["Cash","UPI","Bank Transfer"];
 const DESIGN_TYPES=["Embossed","Acrylic","Laser"];
 const S={PEND:"Pending Factory Acceptance",PROD:"In Production",TRANSIT:"In Transit",RECV:"Received at Office",DELI:"Delivered & Paid"};
 const DELIVERY_LOCATIONS=["At Office","At Production"];
+const COLLECTION_LOCATIONS=["Office Pickup","Factory Pickup"];
 
 // ── Configurable Google Review link — update this with your actual Google Business review URL ──
 const GOOGLE_REVIEW_URL="https://g.page/r/CRzfP2n119hWEBM/review";
@@ -99,6 +100,8 @@ const now2=()=>new Date().toLocaleString("en-IN");
 const fmtM=n=>"₹"+Number(n||0).toLocaleString("en-IN");
 const fmtD=d=>d?new Date(d).toLocaleDateString("en-IN"):"—";
 const fmtON=n=>n?"#"+String(n).padStart(3,"0"):"—";
+const collectionLocationOf=o=>o&&o.deliveryCollectionLocation?o.deliveryCollectionLocation:(o&&o.deliveredLocation?(o.deliveredLocation==="At Production"?"Factory Pickup":o.deliveredLocation==="At Office"?"Office Pickup":o.deliveredLocation):"—");
+const isFactoryOrder=o=>!!(o&&(o.createdFromFactory||o.orderSource==="Factory"||/factory/i.test(o.createdBy||"")));
 const orderSuffixForIndex=i=>i>0?String.fromCharCode(65+i):"";
 const orderGroupIndex=(o,orders=[])=>{
   if(!o) return 0;
@@ -304,6 +307,10 @@ function StatusBadge({s}){
   return <span className="badge" style={{background:st.bg,color:st.color}}>{s}</span>;
 }
 
+function FactoryOrderBadge(){
+  return <span title="Factory order" style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:"50%",background:"#1a1a1a",color:"#fff",fontSize:11,fontWeight:900,border:"2px solid #ffb74d",lineHeight:1}}>F</span>;
+}
+
 function printInvoice(o){
   const w=window.open("","_blank");
   w.document.write(`<!DOCTYPE html><html><head><title>Invoice – ${o.id}</title>
@@ -318,7 +325,7 @@ function printInvoice(o){
   <b>INVOICE</b><br>${o.id}<br><span style="color:#888;font-size:12px">${o.deliveredAt||now2()}</span></div></div>
   <div style="display:flex;justify-content:space-between;font-size:13px;margin-bottom:16px">
   <div><b>Bill To:</b><br>${o.customer}<br>${o.mobile}</div>
-  <div style="text-align:right"><b>Payment:</b> ${o.payMethod||"—"}<br><b>Delivery:</b> ${fmtD(o.delivery)}${o.deliveredLocation?`<br><b>Collected:</b> ${o.deliveredLocation}`:""}</div></div>
+  <div style="text-align:right"><b>Payment:</b> ${o.payMethod||"—"}<br><b>Delivery:</b> ${fmtD(o.delivery)}<br><b>Collection:</b> ${collectionLocationOf(o)}${o.deliveredLocation?`<br><b>Collected:</b> ${o.deliveredLocation}`:""}</div></div>
   <table><thead><tr><th>Product</th><th>Wood</th><th>Size</th><th>Qty</th><th>Total</th></tr></thead>
   <tbody><tr><td>${o.product}</td><td>${o.wood}</td><td class="size-strong">${o.size}</td><td>${o.qty}</td><td>${fmtM(productTotalOf(o))}</td></tr>
   ${o.needsDesign?`<tr><td colspan="4">${o.designType||"Design"} Design Cost</td><td>${fmtM(designCostOf(o))}</td></tr>`:""}</tbody></table>
@@ -543,14 +550,45 @@ function App(){
   const toast2=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
 
   const addOrder=async o=>{
-    const h1=makeHistoryEntry("Order Created","Office");
+    const dept=o.orderSource==="Factory"||o.createdFromFactory?"Factory":"Office";
+    const h1=makeHistoryEntry("Order Created",dept);
     // Brief pause to stagger timestamps
-    const h2=makeHistoryEntry("Sent to Factory","Office");
+    const h2=makeHistoryEntry(dept==="Factory"?"Created at Factory":"Sent to Factory",dept);
     const orderWithHistory={...o,history:[h1,h2]};
     if(window.db){
       try{await window.db.collection("orders").doc(o.id).set({...orderWithHistory,createdTs:firebase.firestore.FieldValue.serverTimestamp()});toast2("Order saved to cloud!");}
       catch(e){toast2("Save failed: "+e.message,"err");}
     }else{setOrders(p=>[orderWithHistory,...p]);toast2("Order created (local only)");}
+  };
+
+  const duplicateOrder=async source=>{
+    if(!source){toast2("Select an order to duplicate","err");return null;}
+    const used=orders.map(o=>o.orderNum).filter(Boolean);
+    const nextNum=used.length?Math.max(...used)+1:1;
+    const id=genId();
+    const factoryCreated=user.role==="Factory Staff";
+    const total=orderTotalOf(source);
+    const copy={
+      ...source,
+      id,orderNum:nextNum,orderSuffix:"",groupId:id,
+      status:S.PEND,created:now2(),createdBy:user.name,createdRole:user.role,
+      orderSource:factoryCreated?"Factory":"Office",createdFromFactory:factoryCreated,
+      advance:0,pending:total,
+      payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",
+      acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",
+      feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:"",
+      deleted:false,deletedAt:"",deletedBy:"",restoredAt:"",restoredBy:"",
+      whatsappConfirmationSent:false,whatsappConfirmationSentAt:"",
+      lastEditedAt:"",lastEditedBy:"",history:[]
+    };
+    copy.deliveryCollectionLocation=source.deliveryCollectionLocation||(
+      source.deliveredLocation==="At Production"?"Factory Pickup":
+      source.deliveredLocation==="At Office"?"Office Pickup":"Office Pickup"
+    );
+    delete copy.createdTs;
+    await addOrder(copy);
+    toast2("Duplicated as Order "+displayOrderNum(copy,[...orders,copy]));
+    return copy;
   };
 
   const updOrder=async(id,patch)=>{
@@ -675,8 +713,8 @@ function App(){
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
           {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto}/>}
-          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user}/>}
-          {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
+          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} duplicateOrder={duplicateOrder} toast2={toast2} user={user}/>}
+          {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} duplicateOrder={duplicateOrder} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
           {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2} user={user}/>}
           {page==="receive"&&<Receive orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="deliver"&&<Deliver orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
@@ -1149,6 +1187,7 @@ ${itemLines}
  *Advance Paid:* ₹${advAmt.toLocaleString("en-IN")}
  *Pending:* ₹${pendAmt.toLocaleString("en-IN")}
  *Delivery Date:* ${o.delivery?fmtD(o.delivery):"—"}
+ *Collection Location:* ${collectionLocationOf(o)}
 
 Thank you for your order! 🙏
 — Hanuman Saw Mill`);
@@ -1222,6 +1261,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
   const [customer,setCustomer]=useState("");
   const [mobile,setMobile]=useState("");
   const [delivery,setDelivery]=useState(todayKey());
+  const [deliveryCollectionLocation,setDeliveryCollectionLocation]=useState("");
   const [orderNumInput,setOrderNumInput]=useState(String(suggestNum));
   const [items,setItems]=useState([emptyItem()]);
   const [done,setDone]=useState(null);
@@ -1235,7 +1275,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
       if(raw){
         const d=JSON.parse(raw);
         if(d.customer||d.mobile||(d.items&&d.items.some(it=>it.dimL||it.qty||it.total))){
-          setCustomer(d.customer||"");setMobile(d.mobile||"");setDelivery(d.delivery||todayKey());
+          setCustomer(d.customer||"");setMobile(d.mobile||"");setDelivery(d.delivery||todayKey());setDeliveryCollectionLocation(d.deliveryCollectionLocation||"");
           if(d.orderNumInput) setOrderNumInput(d.orderNumInput);
           if(d.items&&d.items.length) setItems(d.items.map(it=>({...emptyItem(),...it})));
           toast2("Restored your unsaved order draft");
@@ -1249,9 +1289,9 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
   useEffect(()=>{
     if(!draftLoaded) return;
     try{
-      localStorage.setItem(DRAFT_KEY,JSON.stringify({customer,mobile,delivery,orderNumInput,items}));
+      localStorage.setItem(DRAFT_KEY,JSON.stringify({customer,mobile,delivery,deliveryCollectionLocation,orderNumInput,items}));
     }catch(e){/* ignore */}
-  },[customer,mobile,delivery,orderNumInput,items,draftLoaded]);
+  },[customer,mobile,delivery,deliveryCollectionLocation,orderNumInput,items,draftLoaded]);
 
   const clearDraft=()=>{try{localStorage.removeItem(DRAFT_KEY);}catch(e){}};
 
@@ -1300,7 +1340,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
   const removeItem=i=>setItems(p=>p.filter((_,idx)=>idx!==i));
 
   // ── Enter-key navigation ──
-  const fieldOrder=["customer","mobile","orderNum","delivery"];
+  const fieldOrder=["customer","mobile","orderNum","delivery","deliveryCollectionLocation"];
   items.forEach((_,i)=>{
     ["product","wood","dimL","dimW","dimT","qty","total","designType","designCost","advance","advPayMethod","notes"].forEach(f=>fieldOrder.push(`${f}-${i}`));
   });
@@ -1320,6 +1360,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
   const sub=e=>{
     e.preventDefault();
     if(!customer||!mobile){toast2("Enter customer name and mobile","err");return;}
+    if(!deliveryCollectionLocation){toast2("Select Delivery Collection Location","err");return;}
     const num=parseInt(orderNumInput)||suggestNum;
     if(numberSource.some(o=>o.orderNum===num)){toast2("Order number "+fmtON(num)+" already exists!","err");return;}
     const created=[];
@@ -1333,14 +1374,15 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
       const designTypeFull=it.needsDesign?(it.designType&&it.oilPolish?`${it.designType} + Oil Polish`:it.designType||( it.oilPolish?"Oil Polish":"")):"";
       created.push({
         id:genId(),orderNum:num,orderSuffix:orderSuffixForIndex(i),
-        customer,mobile,delivery,
+        customer,mobile,delivery,deliveryCollectionLocation,
         product:it.product,wood:it.wood,size,qty:Number(it.qty),
         productTotal,total,advance:Number(it.advance)||0,
         pending:Math.max(0,total-(Number(it.advance)||0)),
         advPayMethod:it.advPayMethod||"Cash",
         notes:it.notes,
         needsDesign:!!it.needsDesign,designStatus:it.needsDesign?"Pending":"",designType:designTypeFull,designCost,oilPolish:!!it.oilPolish,
-        status:S.PEND,created:now2(),createdBy:user.name,
+        status:S.PEND,created:now2(),createdBy:user.name,createdRole:user.role,
+        orderSource:user.role==="Factory Staff"?"Factory":"Office",createdFromFactory:user.role==="Factory Staff",
         payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",
         acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",
         feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:"",
@@ -1375,6 +1417,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
             <div key={o.id} style={{background:"#fafaf8",borderRadius:12,padding:12}}>
               <div style={{fontSize:12,fontWeight:700,color:"#cc0000",marginBottom:4}}>{o.orderNum?`Order ${displayOrderNum(o,done)} · `:""}{o.id}</div>
               <div style={{fontSize:12,color:"#777",marginBottom:8}}>{o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b> · Qty {o.qty}</div>
+              <div style={{fontSize:11,color:"#854f0b",fontWeight:700,marginBottom:8}}><i className="ti ti-map-pin" style={{marginRight:4}}/>{collectionLocationOf(o)}{isFactoryOrder(o)&&<span style={{marginLeft:8}}><FactoryOrderBadge/></span>}</div>
               {o.needsDesign&&<div style={{display:"inline-block",background:"#fff3e0",color:"#a35a00",border:"1px solid #ffd9a0",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,marginBottom:8}}><i className="ti ti-pencil-ruler" style={{marginRight:4}}/>{o.designType||"Design"} · {fmtM(o.designCost)}</div>}
               <div style={{background:"#fff",borderRadius:10,padding:8,display:"inline-block"}}><QRSvg order={o} size={140}/></div>
               <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:8,flexWrap:"wrap"}}>
@@ -1384,7 +1427,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
             </div>
           ))}
         </div>
-        <button className="btn btn-outline" onClick={()=>{setDone(null);setCustomer("");setMobile("");setDelivery(todayKey());setOrderNumInput(String(suggestNum+1));setItems([emptyItem()]);clearDraft();}}><i className="ti ti-plus"/>New Order</button>
+        <button className="btn btn-outline" onClick={()=>{setDone(null);setCustomer("");setMobile("");setDelivery(todayKey());setDeliveryCollectionLocation("");setOrderNumInput(String(suggestNum+1));setItems([emptyItem()]);clearDraft();}}><i className="ti ti-plus"/>New Order</button>
       </div>
     </div>
   );
@@ -1446,6 +1489,13 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
                 <div style={{fontSize:10.5,color:"#bbb",marginTop:3}}>Suggested: {fmtON(suggestNum)} · Change if needed</div>
               </div>
               <div><label style={LBL}>Delivery Date</label><input ref={setRef("delivery")} onKeyDown={onEnter("delivery")} type="date" className="inp" value={delivery} onChange={e=>setDelivery(e.target.value)}/></div>
+              <div style={{gridColumn:"span 2"}}>
+                <label style={LBL}>Delivery Collection Location *</label>
+                <select ref={setRef("deliveryCollectionLocation")} onKeyDown={onEnter("deliveryCollectionLocation")} className="inp" value={deliveryCollectionLocation} onChange={e=>setDeliveryCollectionLocation(e.target.value)} required>
+                  <option value="">Select pickup location</option>
+                  {COLLECTION_LOCATIONS.map(l=><option key={l}>{l}</option>)}
+                </select>
+              </div>
             </div>
           </div>
 
@@ -1582,6 +1632,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
     advance:String(order.advance||""),
     advPayMethod:order.advPayMethod||"Cash",
     delivery:order.delivery||"",
+    deliveryCollectionLocation:order.deliveryCollectionLocation||"",
     notes:order.notes||"",
     needsDesign:!!order.needsDesign,
     designType:order.designType?(order.designType.replace(" + Oil Polish","").replace(" + OP","").split("+")[0].trim())||"":"",
@@ -1601,7 +1652,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
 
   const sub=e=>{
     e.preventDefault();
-    if(!f.customer||!f.mobile||!f.dimL||!f.dimW||!f.dimT||!f.qty){toast2("Fill all required fields","err");return;}
+    if(!f.customer||!f.mobile||!f.dimL||!f.dimW||!f.dimT||!f.qty||!f.deliveryCollectionLocation){toast2("Fill all required fields","err");return;}
     const nextNum=String(f.orderNum).trim()===""?null:parseInt(f.orderNum,10);
     if(String(f.orderNum).trim()!==""&&(!nextNum||nextNum<1)){toast2("Enter a valid order number","err");return;}
     const gid=order.groupId||order.id;
@@ -1611,7 +1662,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
     onSave(order.id,{
       orderNum:nextNum,customer:f.customer,mobile:f.mobile,product:f.product,wood:f.wood,
       size,qty:Number(f.qty),productTotal,total,advance:Number(f.advance)||0,
-      pending,advPayMethod:f.advPayMethod,delivery:f.delivery,notes:f.notes,needsDesign:f.needsDesign,
+      pending,advPayMethod:f.advPayMethod,delivery:f.delivery,deliveryCollectionLocation:f.deliveryCollectionLocation,notes:f.notes,needsDesign:f.needsDesign,
       designStatus:f.needsDesign?(order.designStatus||"Pending"):"",
       designType:designTypeFull,
       designCost,oilPolish:!!f.oilPolish,
@@ -1666,6 +1717,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
               </div>
               <div><label style={lbl}>Quantity *</label><input type="number" className="inp" value={f.qty} onChange={e=>upd("qty",e.target.value)} placeholder="Units"/></div>
               <div><label style={lbl}>Delivery Date</label><input type="date" className="inp" value={f.delivery} onChange={e=>upd("delivery",e.target.value)}/></div>
+              <div style={{gridColumn:"span 2"}}><label style={lbl}>Delivery Collection Location *</label><select className="inp" value={f.deliveryCollectionLocation} onChange={e=>upd("deliveryCollectionLocation",e.target.value)} required><option value="">Select pickup location</option>{COLLECTION_LOCATIONS.map(l=><option key={l}>{l}</option>)}</select></div>
               <div style={{gridColumn:"span 2"}}><label style={lbl}>Notes</label><textarea className="inp" rows={2} value={f.notes} onChange={e=>upd("notes",e.target.value)} placeholder="Special instructions..."/></div>
             </div>
           </div>
@@ -1730,7 +1782,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
 }
 
 // ── ORDER LIST ──
-function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,toast2,user}){
+function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,duplicateOrder,toast2,user}){
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
   const [sel,setSel]=useState(null);
@@ -1745,7 +1797,13 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   const matchQ=(o,q)=>{
     if(!q) return true;
     const t=q.toLowerCase().trim();
-    return String(o.customer||"").toLowerCase().includes(t)||String(o.mobile||"").includes(t)||String(o.id||"").toLowerCase().includes(t)||matchesOrderNumber(o,t,allOrders||orders);
+    return String(o.customer||"").toLowerCase().includes(t)||
+      String(o.mobile||"").includes(t)||
+      String(o.id||"").toLowerCase().includes(t)||
+      String(o.size||"").toLowerCase().includes(t)||
+      String(o.wood||"").toLowerCase().includes(t)||
+      String(o.designType||"").toLowerCase().includes(t)||
+      matchesOrderNumber(o,t,allOrders||orders);
   };
   const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
   const doDelete=(o)=>{setDelTarget(o);setSel(null);};
@@ -1803,6 +1861,44 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   },[orders,q,fl]);
 
   const toggleGroup=gid=>setExpandedGroups(p=>{const n=new Set(p);n.has(gid)?n.delete(gid):n.add(gid);return n;});
+  const todayKeyNow=todayKey();
+  const isTodayOrder=o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===todayKeyNow;};
+  const todayOrders=orders.filter(isTodayOrder);
+  const todayRevenue=todayOrders.reduce((a,o)=>a+orderTotalOf(o),0);
+  const summary=[
+    ["Today's Orders",todayOrders.length,"ti-calendar-plus","#0f766e"],
+    ["Pending",orders.filter(o=>o.status===S.PEND).length,"ti-clock-pause","#dc2626"],
+    ["Production",orders.filter(o=>o.status===S.PROD).length,"ti-tool","#f97316"],
+    ["Ready",orders.filter(o=>o.status===S.RECV||o.status===S.TRANSIT).length,"ti-package","#2563eb"],
+    ["Delivered",orders.filter(o=>o.status===S.DELI).length,"ti-circle-check","#16a34a"],
+    ["Today's Revenue",fmtM(todayRevenue),"ti-currency-rupee","#111827"],
+  ];
+  const premiumStatus=o=>{
+    const s=o.status||"";
+    if(/cancel/i.test(s)) return {label:"Cancelled",bg:"#f3f4f6",color:"#6b7280",border:"#e5e7eb"};
+    if(s===S.PEND) return {label:"Factory Pending",bg:"#fff1f2",color:"#be123c",border:"#fecdd3"};
+    if(s===S.PROD) return {label:"Production",bg:"#fff7ed",color:"#c2410c",border:"#fed7aa"};
+    if(s===S.TRANSIT||s===S.RECV) return {label:"Ready",bg:"#eff6ff",color:"#1d4ed8",border:"#bfdbfe"};
+    if(s===S.DELI&&Number(o.pending||0)<=0) return {label:"Paid",bg:"#ecfdf5",color:"#047857",border:"#a7f3d0"};
+    if(s===S.DELI) return {label:"Delivered",bg:"#f0fdf4",color:"#15803d",border:"#bbf7d0"};
+    return {label:s||"—",bg:"#f8fafc",color:"#475569",border:"#e2e8f0"};
+  };
+  const StatusPill=({o})=>{
+    const st=premiumStatus(o);
+    return <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",background:st.bg,color:st.color,border:`1px solid ${st.border}`,borderRadius:999,padding:"5px 10px",fontSize:11.5,fontWeight:800,whiteSpace:"nowrap"}}>{st.label}</span>;
+  };
+  const InfoChip=({icon,children,tone="#64748b"})=>children?(
+    <span style={{display:"inline-flex",alignItems:"center",gap:5,background:"#f8fafc",border:"1px solid #eef2f7",color:tone,borderRadius:999,padding:"5px 9px",fontSize:11.5,fontWeight:700}}>
+      {icon&&<i className={`ti ${icon}`} style={{fontSize:13}}/>}{children}
+    </span>
+  ):null;
+  const designChips=o=>{
+    const chips=[];
+    if(o.needsDesign&&o.designType) chips.push(o.designType);
+    else if(o.needsDesign) chips.push("Design");
+    if(o.oilPolish&&!String(o.designType||"").includes("Oil")) chips.push("Oil Polish");
+    return chips;
+  };
 
   // ── EDIT VIEW ──
   if(editTarget) return(
@@ -1837,8 +1933,9 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",marginBottom:18,flexWrap:"wrap",gap:8}}>
           <div>
-            <div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>
+            <div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2,display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
               <OrderNumberEditor order={sel} orders={allOrders||orders} updOrder={updOrder} user={user} toast2={toast2} onLocalUpdate={setSel}/>
+              {isFactoryOrder(sel)&&<FactoryOrderBadge/>}
             </div>
             <div style={{fontSize:12,color:"#aaa",marginBottom:2}}>{sel.id||"—"}</div>
             <div style={{fontSize:17,fontWeight:700}}>{sel.customer||"—"}</div>
@@ -1860,6 +1957,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
               ["Advance",fmtM(sel.advance)],["Advance Via",sel.advPayMethod||"—"],["Pending",fmtM(sel.pending)]
             ]:[] ),
             ["Delivery",fmtD(sel.delivery)],
+            ["Collection Location",collectionLocationOf(sel)],
             ...(sel.deliveredLocation?[["Collected",sel.deliveredLocation]]:[]),
             ...(sel.lastEditedAt?[["Last Edited",sel.lastEditedAt+" by "+sel.lastEditedBy]]:[])
           ].map(([k,v])=>(
@@ -1880,6 +1978,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
             setSel({...sel,whatsappConfirmationSent:true,whatsappConfirmationSentAt:now2()});
             toast2("WhatsApp confirmation opened");
           }}><i className="ti ti-brand-whatsapp"/>Resend WhatsApp</button>
+          {["Admin","Factory Staff"].includes(user.role)&&<button className="btn btn-outline" onClick={async()=>{const copy=await duplicateOrder(sel);if(copy)setSel(copy);}}><i className="ti ti-copy"/>Duplicate</button>}
           {sel.status===S.DELI&&<button className="btn btn-outline" onClick={()=>printInvoice(sel)}><i className="ti ti-file-invoice"/>Invoice</button>}
         </div>
 
@@ -1946,137 +2045,164 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   );
 
   return(
-    <div>
+    <div style={{maxWidth:1240,margin:"0 auto"}}>
       {histOrder&&<OrderHistoryPanel order={histOrder} onClose={()=>setHistOrder(null)}/>}
       {delTarget&&<DeleteConfirm order={delTarget} onCancel={()=>setDelTarget(null)} onConfirm={()=>{delOrder(delTarget.id);setDelTarget(null);}}/>}
-      <div style={{display:"flex",gap:10,marginBottom:16,flexWrap:"wrap"}}>
-        <div style={{flex:1,minWidth:180,position:"relative"}}>
-          <i className="ti ti-search" style={{position:"absolute",left:11,top:"50%",transform:"translateY(-50%)",color:"#bbb",fontSize:14}}/>
-          <input className="inp" style={{paddingLeft:34}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search name, mobile, ID, order #..."/>
+      <div style={{background:"#fff",border:"1px solid #edf0f4",borderRadius:16,padding:16,boxShadow:"0 12px 32px rgba(15,23,42,.06)",marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:14,flexWrap:"wrap",marginBottom:14}}>
+          <div>
+            <div style={{fontSize:20,fontWeight:850,color:"#0f172a",letterSpacing:0}}>All Orders</div>
+            <div style={{fontSize:12,color:"#94a3b8",marginTop:3}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
+          </div>
+          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",flex:1,justifyContent:"flex-end"}}>
+            <div style={{position:"relative",flex:"1 1 300px",maxWidth:460}}>
+              <i className="ti ti-search" style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",fontSize:15}}/>
+              <input className="inp" style={{paddingLeft:38,borderRadius:14,borderColor:"#e5e7eb",background:"#fbfcfe",height:42}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search customer, mobile, order #, ID, size, wood, design..."/>
+            </div>
+            <select className="inp" style={{width:"auto",minWidth:185,borderRadius:14,borderColor:"#e5e7eb",background:"#fbfcfe",height:42}} value={fl} onChange={e=>setFl(e.target.value)}>
+              <option value="all">All Status</option>
+              <option value={S.PEND}>Pending Factory Acceptance</option>
+              <option value={S.PROD}>In Production</option>
+              <option value={S.TRANSIT}>In Transit</option>
+              <option value={S.RECV}>Received at Office</option>
+              <option value={S.DELI}>Delivered & Paid</option>
+            </select>
+            {isAdmin&&<button className="btn btn-outline" style={{height:42,borderRadius:14,borderColor:bulkMode?"#111827":"#e5e7eb",background:bulkMode?"#111827":"#fff",color:bulkMode?"#fff":"#334155"}} onClick={()=>{setBulkMode(p=>!p);setSelectedIds(new Set());}}>
+              <i className="ti ti-checkbox"/>{bulkMode?"Cancel Select":"Select Orders"}
+            </button>}
+          </div>
         </div>
-        <select className="inp" style={{width:"auto",minWidth:160}} value={fl} onChange={e=>setFl(e.target.value)}>
-          <option value="all">All Status</option>
-          <option value={S.PEND}>Pending Factory Acceptance</option>
-          <option value={S.PROD}>In Production</option>
-          <option value={S.TRANSIT}>In Transit</option>
-          <option value={S.RECV}>Received at Office</option>
-          <option value={S.DELI}>Delivered & Paid</option>
-        </select>
-        {isAdmin&&<button className="btn btn-outline" onClick={()=>{setBulkMode(p=>!p);setSelectedIds(new Set());}}>
-          <i className="ti ti-checkbox"/>{bulkMode?"Cancel Select":"Select Orders"}
-        </button>}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:10}}>
+          {summary.map(([label,value,icon,color])=>(
+            <div key={label} style={{background:"#fbfcfe",border:"1px solid #eef2f7",borderRadius:14,padding:"12px 13px"}}>
+              <div style={{display:"flex",alignItems:"center",gap:7,color:"#64748b",fontSize:11.5,fontWeight:750,marginBottom:7}}>
+                <i className={`ti ${icon}`} style={{color,fontSize:15}}/>{label}
+              </div>
+              <div style={{fontSize:20,fontWeight:850,color:"#0f172a"}}>{value}</div>
+            </div>
+          ))}
+        </div>
       </div>
       {isAdmin&&bulkMode&&(
-        <div style={{background:"#1a1a1a",borderRadius:12,padding:"12px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10}}>
-          <div style={{color:"#fff",fontSize:13,fontWeight:700}}>{selectedIds.size} selected</div>
+        <div style={{background:"#111827",borderRadius:16,padding:"13px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,boxShadow:"0 10px 28px rgba(17,24,39,.18)"}}>
+          <div style={{color:"#fff",fontSize:13,fontWeight:800}}>{selectedIds.size} selected</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button className="btn btn-outline" style={{fontSize:12,color:"#bbb",borderColor:"#555"}} onClick={()=>setSelectedIds(new Set())}>Clear</button>
+            <button className="btn btn-outline" style={{fontSize:12,color:"#cbd5e1",borderColor:"#374151",background:"#1f2937"}} onClick={()=>setSelectedIds(new Set())}>Clear</button>
             <button className="btn btn-red" style={{fontSize:13,opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>{bulkDelOrders([...selectedIds]);setSelectedIds(new Set());setBulkMode(false);}}>
               <i className="ti ti-trash"/>Delete Selected
             </button>
           </div>
         </div>
       )}
-      <div style={{display:"flex",flexDirection:"column",gap:9}}>
-        {groupedFiltered.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No orders found</div>}
+      <div style={{display:"flex",flexDirection:"column",gap:14}}>
+        {groupedFiltered.length===0&&<div style={{textAlign:"center",padding:48,color:"#94a3b8",background:"#fff",borderRadius:16,border:"1px solid #edf0f4",boxShadow:"0 12px 30px rgba(15,23,42,.05)"}}>No orders found</div>}
         {groupedFiltered.map(({primary:o,subs})=>{
           const gid=o.groupId||o.id;
           const hasMulti=subs.length>0;
           const isExpanded=expandedGroups.has(gid);
-          const groupTotal=hasMulti?[o,...subs].reduce((a,x)=>a+orderTotalOf(x),0):null;
-          const groupPending=hasMulti?[o,...subs].reduce((a,x)=>a+Number(x.pending||0),0):null;
-          // Determine aggregate status label for multi-item groups
-          const allStatuses=hasMulti?[...new Set([o,...subs].map(x=>x.status))]:null;
+          const groupOrders=hasMulti?[o,...subs]:[o];
+          const groupTotal=groupOrders.reduce((a,x)=>a+orderTotalOf(x),0);
+          const groupPending=groupOrders.reduce((a,x)=>a+Number(x.pending||0),0);
+          const today=isTodayOrder(o);
+          const allStatuses=hasMulti?[...new Set(groupOrders.map(x=>x.status))]:null;
           const mixedStatus=allStatuses&&allStatuses.length>1;
+          const allSizes=[...new Set(groupOrders.map(x=>x.size).filter(Boolean))];
+          const allQty=groupOrders.reduce((a,x)=>a+Number(x.qty||0),0);
+          const cardBorder=today?"#86efac":hasMulti&&isExpanded?"#cbd5e1":"#edf0f4";
 
           return(
-            <div key={gid} style={{borderRadius:14,overflow:"hidden",border:hasMulti?(isExpanded?"1.5px solid #cc0000":"1.5px solid #e8d5d5"):"1px solid #eeebe6",background:"#fff",boxShadow:hasMulti?"0 1px 6px rgba(204,0,0,.06)":"none"}}>
-              {/* ── Primary row ── */}
-              <div style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",flexWrap:"wrap"}}>
-                {isAdmin&&bulkMode&&(
-                  <div onClick={()=>setSelectedIds(p=>{const ids=[o,...subs].map(x=>x.id);const n=new Set(p);const allChosen=ids.every(id=>n.has(id));ids.forEach(id=>allChosen?n.delete(id):n.add(id));return n;})} style={{width:24,height:24,borderRadius:6,border:`2px solid ${[o,...subs].every(x=>selectedIds.has(x.id))?"#cc0000":"#ddd"}`,background:[o,...subs].every(x=>selectedIds.has(x.id))?"#cc0000":"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
-                    {[o,...subs].every(x=>selectedIds.has(x.id))&&<i className="ti ti-check" style={{fontSize:14,color:"#fff"}}/>}
-                  </div>
-                )}
-                <div onClick={()=>setSel(o)} style={{display:"flex",alignItems:"center",gap:12,flex:1,minWidth:0,cursor:"pointer"}}>
-                  <div style={{width:44,height:44,background:"#fff3f3",borderRadius:10,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,position:"relative"}}>
-                    <OrderNumberEditor order={o} orders={allOrders||orders} updOrder={updOrder} user={user} toast2={toast2} compact/>
-                    {hasMulti&&<div style={{position:"absolute",top:-5,right:-5,background:"#cc0000",color:"#fff",borderRadius:"50%",width:16,height:16,fontSize:9,fontWeight:800,display:"flex",alignItems:"center",justifyContent:"center",lineHeight:1}}>{subs.length+1}</div>}
-                  </div>
-                  <div style={{flex:1,minWidth:0}}>
-                    <div style={{fontWeight:700,fontSize:14,whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.customer}</div>
-                    <div style={{fontSize:11,color:"#aaa"}}>{o.id}</div>
-                    <div style={{fontSize:11,color:"#aaa"}}>{orderDateTime(o).label}</div>
-                    <div style={{fontSize:12,color:"#777"}}>
-                      {o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b> · Qty {o.qty}
-                      {hasMulti&&<span style={{marginLeft:6,fontSize:11,color:"#cc0000",fontWeight:600}}>+{subs.length} more size{subs.length>1?"s":""}</span>}
+            <div key={gid} style={{position:"relative",overflow:"hidden",background:today?"#f7fef9":"#fff",border:`1px solid ${cardBorder}`,borderLeft:`4px solid ${today?"#22c55e":"transparent"}`,borderRadius:16,boxShadow:"0 14px 36px rgba(15,23,42,.06)"}}>
+              <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:18,padding:"16px 18px",alignItems:"start"}}>
+                <div style={{display:"flex",gap:13,minWidth:0}}>
+                  {isAdmin&&bulkMode&&(
+                    <div onClick={()=>setSelectedIds(p=>{const ids=groupOrders.map(x=>x.id);const n=new Set(p);const allChosen=ids.every(id=>n.has(id));ids.forEach(id=>allChosen?n.delete(id):n.add(id));return n;})} style={{width:24,height:24,borderRadius:8,border:`2px solid ${groupOrders.every(x=>selectedIds.has(x.id))?"#111827":"#cbd5e1"}`,background:groupOrders.every(x=>selectedIds.has(x.id))?"#111827":"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,marginTop:3}}>
+                      {groupOrders.every(x=>selectedIds.has(x.id))&&<i className="ti ti-check" style={{fontSize:14,color:"#fff"}}/>}
                     </div>
-                    {isAdmin&&o.status===S.DELI&&o.deliveredAt&&(()=>{const daysLeft=Math.max(0,15-Math.floor((Date.now()-parseLocaleDateMs(o.deliveredAt))/(1000*60*60*24)));return<div style={{fontSize:10,color:daysLeft<=3?"#cc0000":"#bbb",marginTop:2,fontWeight:daysLeft<=3?700:400}}><i className="ti ti-clock" style={{marginRight:3}}/>Auto-delete in {daysLeft} day{daysLeft===1?"":"s"}</div>;})()}
+                  )}
+                  <div style={{minWidth:0,flex:1,cursor:"pointer"}} onClick={()=>setSel(o)}>
+                    <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:7}}>
+                      <OrderNumberEditor order={o} orders={allOrders||orders} updOrder={updOrder} user={user} toast2={toast2} compact/>
+                      {today&&<span style={{background:"#dcfce7",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:999,padding:"3px 8px",fontSize:10.5,fontWeight:900}}>TODAY</span>}
+                      {isFactoryOrder(o)&&<FactoryOrderBadge/>}
+                      {hasMulti&&<span style={{background:"#f1f5f9",color:"#475569",border:"1px solid #e2e8f0",borderRadius:999,padding:"3px 8px",fontSize:10.5,fontWeight:800}}>{groupOrders.length} sizes</span>}
+                    </div>
+                    <div style={{fontSize:16,fontWeight:850,color:"#0f172a",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:3}}>{o.customer||"Unnamed Customer"}</div>
+                    <div style={{fontSize:11.5,color:"#94a3b8",display:"flex",gap:8,flexWrap:"wrap",marginBottom:9}}>
+                      {o.id&&<span>{o.id}</span>}
+                      {orderDateTime(o).label&&<span>{orderDateTime(o).label}</span>}
+                      {o.mobile&&<span>{o.mobile}</span>}
+                    </div>
+                    <div style={{display:"flex",gap:7,flexWrap:"wrap",alignItems:"center",marginBottom:9}}>
+                      <InfoChip icon="ti-map-pin" tone="#854f0b">{collectionLocationOf(o)!=="—"?collectionLocationOf(o):""}</InfoChip>
+                      <InfoChip icon="ti-tree" tone="#166534">{o.wood}</InfoChip>
+                      <InfoChip icon="ti-ruler" tone="#334155">{allSizes.length?allSizes.join(", "):""}</InfoChip>
+                      <InfoChip icon="ti-packages" tone="#334155">{allQty?`Qty ${allQty}`:""}</InfoChip>
+                    </div>
+                    <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
+                      {designChips(o).map(chip=><span key={chip} style={{display:"inline-flex",alignItems:"center",gap:5,background:"#fff7ed",border:"1px solid #fed7aa",color:"#c2410c",borderRadius:999,padding:"4px 9px",fontSize:11.5,fontWeight:800}}><i className="ti ti-pencil-ruler" style={{fontSize:13}}/>{chip}</span>)}
+                      {o.product&&<span style={{display:"inline-flex",alignItems:"center",gap:5,background:"#f8fafc",border:"1px solid #eef2f7",color:"#64748b",borderRadius:999,padding:"4px 9px",fontSize:11.5,fontWeight:700}}>{o.product}</span>}
+                      {o.notes&&<span style={{display:"inline-flex",alignItems:"center",gap:5,background:"#fff1f2",border:"1px solid #ffe4e6",color:"#be123c",borderRadius:999,padding:"4px 9px",fontSize:11.5,fontWeight:700}}><i className="ti ti-note" style={{fontSize:13}}/>Notes</span>}
+                    </div>
+                    {isAdmin&&o.status===S.DELI&&o.deliveredAt&&(()=>{const daysLeft=Math.max(0,15-Math.floor((Date.now()-parseLocaleDateMs(o.deliveredAt))/(1000*60*60*24)));return <div style={{fontSize:10.5,color:daysLeft<=3?"#dc2626":"#94a3b8",marginTop:8,fontWeight:daysLeft<=3?800:600}}><i className="ti ti-clock" style={{marginRight:3}}/>Auto-delete in {daysLeft} day{daysLeft===1?"":"s"}</div>;})()}
                   </div>
                 </div>
-                <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0,flexWrap:"wrap"}}>
-                  {["Admin","Accountant"].includes(user.role)&&<div style={{textAlign:"right"}}>
-                    <div style={{fontWeight:700,fontSize:13}}>{hasMulti?fmtM(groupTotal):fmtM(orderTotalOf(o))}</div>
-                    {o.needsDesign&&!hasMulti&&<div style={{fontSize:10.5,color:"#a35a00"}}>{o.designType||"Design"} +{fmtM(designCostOf(o))}</div>}
-                    {(hasMulti?groupPending:o.pending)>0&&<div style={{fontSize:11,color:"#cc0000"}}>Due: {fmtM(hasMulti?groupPending:o.pending)}</div>}
-                  </div>}
-                  {!hasMulti&&<StatusBadge s={o.status}/>}
-                  {hasMulti&&(mixedStatus
-                    ?<span style={{fontSize:11,fontWeight:700,background:"#fff3f3",color:"#cc0000",border:"1px solid #ffcccc",borderRadius:20,padding:"3px 9px"}}>Mixed</span>
-                    :<StatusBadge s={allStatuses[0]}/>
+                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:10,minWidth:190}}>
+                  {["Admin","Accountant"].includes(user.role)&&(
+                    <div style={{textAlign:"right"}}>
+                      <div style={{fontSize:22,fontWeight:900,color:"#0f172a",lineHeight:1}}>{fmtM(groupTotal)}</div>
+                      {groupPending>0&&<div style={{fontSize:12,color:"#dc2626",fontWeight:800,marginTop:5}}>Due {fmtM(groupPending)}</div>}
+                    </div>
                   )}
-                  {hasMulti&&(
-                    <button
-                      title={isExpanded?"Collapse items":"Expand items"}
-                      style={{background:isExpanded?"#fff3f3":"#fafaf8",border:`1.5px solid ${isExpanded?"#ffcccc":"#e0ddd8"}`,borderRadius:9,width:34,height:34,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:isExpanded?"#cc0000":"#888",flexShrink:0,transition:"all .15s"}}
-                      onClick={e=>{e.stopPropagation();toggleGroup(gid);}}>
-                      <i className={`ti ${isExpanded?"ti-chevron-up":"ti-chevron-down"}`} style={{fontSize:15}}/>
-                    </button>
-                  )}
-                  <button className="btn btn-outline" title="View History" style={{padding:"6px 10px",fontSize:12,flexShrink:0}} onClick={e=>{e.stopPropagation();setHistOrder(o);}}><i className="ti ti-history"/></button>
-                  <button className="btn" style={{padding:"6px 10px",fontSize:12,background:"#25D366",color:"#fff",flexShrink:0}} onClick={e=>{e.stopPropagation();sendWhatsApp(sameOrderGroup(o,orders));updOrder(o.id,{whatsappConfirmationSent:true,whatsappConfirmationSentAt:now2()});toast2("WhatsApp confirmation opened");}}><i className="ti ti-brand-whatsapp"/>Resend</button>
-                  {isAdmin&&<button className="btn btn-danger" title="Move to Trash" style={{padding:"6px 10px",fontSize:12,flexShrink:0}} onClick={e=>{e.stopPropagation();doDelete(o);}}><i className="ti ti-trash"/></button>}
+                  {mixedStatus
+                    ?<span style={{fontSize:11.5,fontWeight:800,background:"#f8fafc",color:"#475569",border:"1px solid #e2e8f0",borderRadius:999,padding:"5px 10px"}}>Mixed Status</span>
+                    :<StatusPill o={o}/>}
+                  <div style={{display:"flex",gap:7,flexWrap:"wrap",justifyContent:"flex-end"}}>
+                    <button className="btn" title="WhatsApp" style={{padding:"8px 11px",fontSize:12,background:"#16a34a",color:"#fff",borderRadius:12,boxShadow:"0 8px 18px rgba(22,163,74,.18)"}} onClick={e=>{e.stopPropagation();sendWhatsApp(sameOrderGroup(o,orders));updOrder(o.id,{whatsappConfirmationSent:true,whatsappConfirmationSentAt:now2()});toast2("WhatsApp confirmation opened");}}><i className="ti ti-brand-whatsapp"/>WhatsApp</button>
+                    {hasMulti&&<button title={isExpanded?"Collapse sizes":"Expand sizes"} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#475569"}} onClick={e=>{e.stopPropagation();toggleGroup(gid);}}><i className={`ti ${isExpanded?"ti-chevron-up":"ti-chevron-down"}`} style={{fontSize:16}}/></button>}
+                    <button title="More" style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#475569"}} onClick={e=>{e.stopPropagation();setHistOrder(o);}}><i className="ti ti-dots-vertical" style={{fontSize:17}}/></button>
+                    {["Admin","Factory Staff"].includes(user.role)&&<button title="Duplicate Order" style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#475569"}} onClick={e=>{e.stopPropagation();duplicateOrder(o);}}><i className="ti ti-copy" style={{fontSize:16}}/></button>}
+                    {isAdmin&&<button title="Move to Trash" style={{background:"#fff7f7",border:"1px solid #fecaca",borderRadius:12,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#dc2626"}} onClick={e=>{e.stopPropagation();doDelete(o);}}><i className="ti ti-trash" style={{fontSize:16}}/></button>}
+                  </div>
                 </div>
               </div>
-
-              {/* ── Sub-items: only shown when expanded ── */}
               {hasMulti&&isExpanded&&(
-                <div style={{borderTop:"1px solid #f5eeee"}}>
+                <div style={{borderTop:"1px solid #edf0f4",background:"#fbfcfe",padding:"8px 14px 12px"}}>
                   {subs.map((sub,si)=>(
-                    <div key={sub.id} style={{display:"flex",alignItems:"center",gap:10,padding:"9px 14px 9px 22px",borderBottom:si<subs.length-1?"1px solid #f9f5f5":"none",background:"#fdfafa",flexWrap:"wrap"}}>
-                      {/* indent line */}
-                      <div style={{width:3,height:36,background:"#ffcccc",borderRadius:3,flexShrink:0,marginRight:4}}/>
-                      {isAdmin&&bulkMode&&(
-                        <div onClick={()=>setSelectedIds(p=>{const n=new Set(p);n.has(sub.id)?n.delete(sub.id):n.add(sub.id);return n;})} style={{width:22,height:22,borderRadius:6,border:`2px solid ${selectedIds.has(sub.id)?"#cc0000":"#ddd"}`,background:selectedIds.has(sub.id)?"#cc0000":"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
-                          {selectedIds.has(sub.id)&&<i className="ti ti-check" style={{fontSize:13,color:"#fff"}}/>}
-                        </div>
-                      )}
-                      <div onClick={()=>setSel(sub)} style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0,cursor:"pointer"}}>
-                        <div style={{width:36,height:36,background:"#fff0f0",borderRadius:9,display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0,fontSize:10,color:"#cc0000",fontWeight:700}}>
-                          S{si+2}
-                        </div>
-                        <div style={{flex:1,minWidth:0}}>
-                          <div style={{fontSize:12.5,fontWeight:600,color:"#444"}}>{sub.product} · {sub.wood} · <b className="size-strong-sm">{sub.size}</b></div>
-                          <div style={{fontSize:11,color:"#aaa"}}>{sub.id} · Qty {sub.qty}</div>
+                    <div key={sub.id} style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:12,alignItems:"center",padding:"10px 8px",borderBottom:si<subs.length-1?"1px solid #edf0f4":"none"}}>
+                      <div onClick={()=>setSel(sub)} style={{display:"flex",alignItems:"center",gap:10,minWidth:0,cursor:"pointer"}}>
+                        {isAdmin&&bulkMode&&(
+                          <div onClick={e=>{e.stopPropagation();setSelectedIds(p=>{const n=new Set(p);n.has(sub.id)?n.delete(sub.id):n.add(sub.id);return n;});}} style={{width:22,height:22,borderRadius:7,border:`2px solid ${selectedIds.has(sub.id)?"#111827":"#cbd5e1"}`,background:selectedIds.has(sub.id)?"#111827":"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0}}>
+                            {selectedIds.has(sub.id)&&<i className="ti ti-check" style={{fontSize:13,color:"#fff"}}/>}
+                          </div>
+                        )}
+                        <div style={{width:34,height:34,borderRadius:11,background:"#eef2ff",color:"#4338ca",display:"flex",alignItems:"center",justifyContent:"center",fontSize:11,fontWeight:900,flexShrink:0}}>S{si+2}</div>
+                        <div style={{minWidth:0}}>
+                          <div style={{display:"flex",gap:6,alignItems:"center",flexWrap:"wrap",fontSize:12.5,fontWeight:800,color:"#0f172a"}}>
+                            {isFactoryOrder(sub)&&<FactoryOrderBadge/>}
+                            {sub.wood&&<span>{sub.wood}</span>}
+                            {sub.size&&<b className="size-strong-sm">{sub.size}</b>}
+                            {sub.qty&&<span>Qty {sub.qty}</span>}
+                            {designChips(sub).map(chip=><span key={chip} style={{background:"#fff7ed",border:"1px solid #fed7aa",color:"#c2410c",borderRadius:999,padding:"2px 7px",fontSize:10.5,fontWeight:800}}>{chip}</span>)}
+                          </div>
+                          <div style={{fontSize:11,color:"#94a3b8",marginTop:2}}>{sub.id}{collectionLocationOf(sub)!=="—"?` · ${collectionLocationOf(sub)}`:""}</div>
                         </div>
                       </div>
-                      <div style={{display:"flex",alignItems:"center",gap:7,flexShrink:0,flexWrap:"wrap"}}>
+                      <div style={{display:"flex",alignItems:"center",gap:8,justifyContent:"flex-end",flexWrap:"wrap"}}>
                         {["Admin","Accountant"].includes(user.role)&&<div style={{textAlign:"right",fontSize:12}}>
-                          <div style={{fontWeight:700,color:"#333"}}>{fmtM(orderTotalOf(sub))}</div>
-                          {sub.pending>0&&<div style={{fontSize:11,color:"#cc0000"}}>Due: {fmtM(sub.pending)}</div>}
+                          <div style={{fontWeight:850,color:"#0f172a"}}>{fmtM(orderTotalOf(sub))}</div>
+                          {sub.pending>0&&<div style={{fontSize:11,color:"#dc2626",fontWeight:800}}>Due {fmtM(sub.pending)}</div>}
                         </div>}
-                        <StatusBadge s={sub.status}/>
-                        <button className="btn btn-outline" title="View History" style={{padding:"5px 8px",fontSize:11}} onClick={e=>{e.stopPropagation();setHistOrder(sub);}}><i className="ti ti-history"/></button>
-                        {isAdmin&&<button className="btn btn-danger" title="Move to Trash" style={{padding:"5px 8px",fontSize:11}} onClick={e=>{e.stopPropagation();doDelete(sub);}}><i className="ti ti-trash"/></button>}
+                        <StatusPill o={sub}/>
+                        <button title="More" style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:11,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#475569"}} onClick={e=>{e.stopPropagation();setHistOrder(sub);}}><i className="ti ti-dots-vertical" style={{fontSize:15}}/></button>
+                        {isAdmin&&<button title="Move to Trash" style={{background:"#fff7f7",border:"1px solid #fecaca",borderRadius:11,width:32,height:32,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#dc2626"}} onClick={e=>{e.stopPropagation();doDelete(sub);}}><i className="ti ti-trash" style={{fontSize:15}}/></button>}
                       </div>
                     </div>
                   ))}
-                  {/* ── Group summary footer ── */}
                   {["Admin","Accountant"].includes(user.role)&&(
-                    <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",gap:16,padding:"8px 16px",background:"#fff8f8",borderTop:"1px solid #f5eeee",fontSize:12}}>
-                      <span style={{color:"#888"}}>{subs.length+1} items total</span>
-                      <span style={{fontWeight:700,color:"#333"}}>Group Total: {fmtM(groupTotal)}</span>
-                      {groupPending>0&&<span style={{fontWeight:700,color:"#cc0000"}}>Due: {fmtM(groupPending)}</span>}
+                    <div style={{display:"flex",justifyContent:"flex-end",alignItems:"center",gap:16,padding:"10px 8px 0",fontSize:12,color:"#64748b"}}>
+                      <span>{groupOrders.length} items total</span>
+                      <span style={{fontWeight:850,color:"#0f172a"}}>Group Total: {fmtM(groupTotal)}</span>
+                      {groupPending>0&&<span style={{fontWeight:850,color:"#dc2626"}}>Due: {fmtM(groupPending)}</span>}
                     </div>
                   )}
                 </div>
@@ -2085,6 +2211,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
           );
         })}
       </div>
+      <style>{`@media(max-width:760px){main{padding:14px!important}.orders-right{align-items:flex-start!important}}`}</style>
     </div>
   );
 }
@@ -2129,7 +2256,7 @@ function DispatchModal({order,onConfirm,onCancel,toast2}){
 }
 
 // ── FACTORY ──
-function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2,goto}){
+function Factory({orders,allOrders,delOrder,updOrder,updOrderH,duplicateOrder,user,onAdd,toast2,goto}){
   const pendAccept=orders.filter(o=>o.status===S.PEND);
   const inProd=orders.filter(o=>o.status===S.PROD);
   const inTransit=orders.filter(o=>o.status===S.TRANSIT);
@@ -2192,9 +2319,9 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
           <i className="ti ti-package-export" style={{fontSize:26,color:"#1d9e75"}}/>
         </div>
         <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>Delivered from Factory!</div>
-        {factoryDeliveredOrder.orderNum&&<div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>Order {displayOrderNum(factoryDeliveredOrder,orders)}</div>}
+        {factoryDeliveredOrder.orderNum&&<div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2,display:"flex",alignItems:"center",justifyContent:"center",gap:8,flexWrap:"wrap"}}>Order {displayOrderNum(factoryDeliveredOrder,orders)} {isFactoryOrder(factoryDeliveredOrder)&&<FactoryOrderBadge/>}</div>}
         <div style={{fontSize:13,color:"#999",marginBottom:4}}>{factoryDeliveredOrder.customer} · {factoryDeliveredOrder.mobile}</div>
-        <div style={{fontSize:11,color:"#1d9e75",fontWeight:600,marginBottom:16}}>📍 Collected at Factory — Delivered & Paid</div>
+        <div style={{fontSize:11,color:"#1d9e75",fontWeight:600,marginBottom:16}}>Collection: {collectionLocationOf(factoryDeliveredOrder)} — Delivered & Paid</div>
         <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:18,textAlign:"left",border:"1px solid #eeebe6"}}>
           <div style={{fontSize:12,fontWeight:700,color:"#888",marginBottom:8,textTransform:"uppercase",letterSpacing:.5}}>Order Summary</div>
           {[["Product",factoryDeliveredOrder.product],["Wood",factoryDeliveredOrder.wood],["Size",factoryDeliveredOrder.size],["Qty",factoryDeliveredOrder.qty],["Delivered At",factoryDeliveredOrder.deliveredAt]].map(([k,v])=>(
@@ -2231,8 +2358,9 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
       {dispatchTarget&&<DispatchModal order={dispatchTarget} toast2={toast2} onCancel={()=>setDispatchTarget(null)} onConfirm={()=>confirmDispatch(dispatchTarget)}/>}
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setSel(null)}>← Back</button>
       <div className="card" style={{textAlign:"center"}}>
-        <div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>
+        <div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2,display:"flex",alignItems:"center",justifyContent:"center",gap:8,flexWrap:"wrap"}}>
           <OrderNumberEditor order={sel} orders={orders} updOrder={updOrder} user={user} toast2={toast2} onLocalUpdate={setSel}/>
+          {isFactoryOrder(sel)&&<FactoryOrderBadge/>}
         </div>
         <div style={{fontSize:12,color:"#aaa",marginBottom:4}}>{sel.id||"—"}</div>
         <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>{sel.customer||"—"}</div>
@@ -2240,7 +2368,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
         <div style={{marginBottom:14}}><StatusBadge s={sel.status}/></div>
         <div style={{background:"#fafaf8",borderRadius:12,padding:14,display:"inline-block",marginBottom:14}}><QRSvg order={sel}/></div>
         <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12.5,marginBottom:16,textAlign:"left"}}>
-          {[["Product",sel.product||"—"],["Wood",sel.wood||"—"],["Size",sel.size||"—"],["Qty",sel.qty||"—"],["Order Date",orderDateTime(sel).date],["Order Time",orderDateTime(sel).time],["Delivery",fmtD(sel.delivery)]].map(([k,v])=>(
+          {[["Product",sel.product||"—"],["Wood",sel.wood||"—"],["Size",sel.size||"—"],["Qty",sel.qty||"—"],["Order Date",orderDateTime(sel).date],["Order Time",orderDateTime(sel).time],["Delivery",fmtD(sel.delivery)],["Collection",collectionLocationOf(sel)]].map(([k,v])=>(
             <div key={k} style={{background:k==="Size"?"#f5f0e8":"#fafaf8",borderRadius:9,padding:"9px 11px",border:k==="Size"?"1.5px solid #d5cfc4":"none",gridColumn:k==="Size"?"span 2":undefined}}><div style={{fontSize:10,color:"#bbb",marginBottom:2}}>{k}</div><div className={k==="Size"?"size-strong":""} style={{fontWeight:600}}>{v}</div></div>
           ))}
           {sel.notes&&<div style={{gridColumn:"span 2",background:"#fff8f8",borderRadius:9,padding:"9px 11px",border:"1px solid #ffe0e0"}}><div style={{fontSize:10,color:"#cc0000",marginBottom:2}}>Notes</div><div style={{fontSize:12}}>{sel.notes}</div></div>}
@@ -2251,6 +2379,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
           {sel.status!==S.DELI&&<button className="btn btn-green" style={{fontSize:14}} onClick={()=>markFactoryDelivered(sel)}><i className="ti ti-package-export"/>Deliver at Factory{sel.status===S.PEND?" (Auto-Accept)":""}</button>}
           {sel.status===S.TRANSIT&&<div style={{padding:"10px 16px",background:"#f0e6fb",borderRadius:10,color:"#6a1bb5",fontWeight:600,fontSize:13}}><i className="ti ti-truck" style={{marginRight:6}}/>In Transit since {sel.dispatchedAt}</div>}
           <button className="btn btn-outline" style={{fontSize:13}} onClick={()=>setHistOrder(sel)}><i className="ti ti-history"/>History</button>
+          <button className="btn btn-outline" style={{fontSize:13}} onClick={async()=>{const copy=await duplicateOrder(sel);if(copy)setSel(copy);}}><i className="ti ti-copy"/>Duplicate</button>
           <button className="btn btn-red" onClick={()=>printQR(sel)}><i className="ti ti-printer"/>Print QR</button>
           {user.role==="Admin"&&<button className="btn btn-danger" onClick={()=>setDelTarget(sel)}><i className="ti ti-trash"/>Trash</button>}
         </div>
@@ -2275,8 +2404,12 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
                 <OrderNumberEditor order={o} orders={orders} updOrder={updOrder} user={user} toast2={toast2} compact/>
               </div>
               <div style={{flex:1,minWidth:0}}>
-                <div style={{fontWeight:700,color:"#1a1a1a",fontSize:14}}>{o.customer}</div>
+                <div style={{display:"flex",alignItems:"center",gap:6,flexWrap:"wrap"}}>
+                  <div style={{fontWeight:700,color:"#1a1a1a",fontSize:14}}>{o.customer}</div>
+                  {isFactoryOrder(o)&&<FactoryOrderBadge/>}
+                </div>
                 <div style={{fontSize:11,color:"#aaa"}}>{orderDateTime(o).label}</div>
+                <div style={{fontSize:11,color:"#854f0b",fontWeight:600}}><i className="ti ti-map-pin" style={{marginRight:3}}/>{collectionLocationOf(o)}</div>
                 <div style={{fontSize:12,color:"#999"}}>{o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b> · Qty {o.qty}</div>
               </div>
               <div style={{textAlign:"right",marginRight:4,flexShrink:0}}>
@@ -2286,6 +2419,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
               {!qrSelectMode&&renderAction(o)}
+              {!qrSelectMode&&<button className="btn btn-outline" title="Duplicate Order" style={{padding:"6px 10px",fontSize:12}} onClick={e=>{e.stopPropagation();duplicateOrder(o);}}><i className="ti ti-copy"/></button>}
               {!qrSelectMode&&user.role==="Admin"&&<button className="btn btn-danger" title="Move to Trash" style={{padding:"6px 10px",fontSize:12}} onClick={e=>{e.stopPropagation();setDelTarget(o);}}><i className="ti ti-trash"/></button>}
             </div>
           </div>
@@ -2370,7 +2504,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
                   <StatusBadge s={scanResult.status}/>
                 </div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:12}}>
-                  {[["Product",scanResult.product],["Wood",scanResult.wood],["Size",scanResult.size],["Qty",scanResult.qty],["Order Date",orderDateTime(scanResult).date],["Order Time",orderDateTime(scanResult).time],["Delivery",fmtD(scanResult.delivery)]].map(([k,v])=>(
+                  {[["Product",scanResult.product],["Wood",scanResult.wood],["Size",scanResult.size],["Qty",scanResult.qty],["Order Date",orderDateTime(scanResult).date],["Order Time",orderDateTime(scanResult).time],["Delivery",fmtD(scanResult.delivery)],["Collection",collectionLocationOf(scanResult)]].map(([k,v])=>(
                     <div key={k} style={{background:k==="Size"?"#d9f5ec":"#fff",borderRadius:8,padding:"8px 10px",gridColumn:k==="Size"?"span 3":undefined,border:k==="Size"?"1.5px solid #7dd8b5":"none"}}>
                       <div style={{fontSize:10,color:"#bbb",marginBottom:2}}>{k}</div>
                       <div className={k==="Size"?"size-strong":""} style={{fontWeight:700,fontSize:12.5,color:"#1a1a1a"}}>{v}</div>
@@ -2467,7 +2601,7 @@ function Receive({orders,updOrder,updOrderH,user,toast2}){
             <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>{found.customer}</div>
             <div style={{fontSize:13,color:"#999",marginBottom:12}}>{found.mobile}</div>
             <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12.5}}>
-              {[["Product",found.product],["Wood",found.wood],["Size",found.size],["Qty",found.qty],["Order Date",orderDateTime(found).date],["Order Time",orderDateTime(found).time],["Total",fmtM(orderTotalOf(found))],["Pending",fmtM(found.pending)]].map(([k,v])=>(
+              {[["Product",found.product],["Wood",found.wood],["Size",found.size],["Qty",found.qty],["Order Date",orderDateTime(found).date],["Order Time",orderDateTime(found).time],["Collection",collectionLocationOf(found)],["Total",fmtM(orderTotalOf(found))],["Pending",fmtM(found.pending)]].map(([k,v])=>(
                 <div key={k} style={{background:k==="Size"?"#f5f0e8":"transparent",borderRadius:k==="Size"?8:0,padding:k==="Size"?"6px 8px":0,gridColumn:k==="Size"?"span 2":undefined,border:k==="Size"?"1.5px solid #d5cfc4":"none"}}><span style={{color:"#bbb"}}>{k}: </span><b className={k==="Size"?"size-strong":""}>{v}</b></div>
               ))}
             </div>
@@ -2596,6 +2730,7 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
             <div style={{fontSize:11,color:"#aaa",marginBottom:3}}>{found.id}</div>
             <div style={{fontWeight:700,fontSize:14}}>{found.customer} · {found.mobile}</div>
             <div style={{fontSize:11,color:"#aaa",marginTop:2}}>{orderDateTime(found).label}</div>
+            <div style={{fontSize:11,color:"#854f0b",fontWeight:600,marginTop:2}}><i className="ti ti-map-pin" style={{marginRight:3}}/>{collectionLocationOf(found)}</div>
             <div style={{fontSize:12,color:"#777",marginTop:2}}>{found.product} · {found.wood} · <b className="size-strong-sm">{found.size}</b> · Qty {found.qty}</div>
           </div>
           {found.status===S.PEND&&<div style={{padding:12,background:"#ffe9e9",borderRadius:10,color:"#cc0000",fontWeight:600,fontSize:13,textAlign:"center",marginBottom:13}}>⏳ Order not yet accepted by factory</div>}
@@ -2906,9 +3041,10 @@ function CustomerTab({orders,custQ,setCustQ}){
                       <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<c.orders.length-1?"1px solid #f5f2ee":"none",flexWrap:"wrap",gap:6}}>
                         <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
                           {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:13,flexShrink:0}}>{displayOrderNum(o,orders)}</span>}
+                          {isFactoryOrder(o)&&<FactoryOrderBadge/>}
                           <div style={{minWidth:0}}>
                             <div style={{fontSize:12.5,fontWeight:600,color:"#333",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis"}}>{o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b></div>
-                            <div style={{fontSize:11,color:"#bbb"}}>{orderDateTime(o).label}{o.qty?` · Qty ${o.qty}`:""}</div>
+                            <div style={{fontSize:11,color:"#bbb"}}>{orderDateTime(o).label}{o.qty?` · Qty ${o.qty}`:""} · {collectionLocationOf(o)}</div>
                           </div>
                         </div>
                         <div style={{display:"flex",alignItems:"center",gap:8,flexShrink:0}}>
@@ -2943,9 +3079,11 @@ function Reports({orders}){
   const pend=orders.filter(o=>o.status!==S.DELI&&o.pending>0);
   const rated=orders.filter(o=>o.customerRating);
   const tabs=[["daily","Daily Sales"],["monthly","Monthly Reports"],["design","Design Revenue"],["pending","Pending"],["delivered","Delivered"],["customers","Customers"],["feedback","Feedback"]];
-  const labels={orderNum:"Order #",id:"Order ID",customer:"Customer",mobile:"Mobile",product:"Product",wood:"Wood",size:"Size",qty:"Qty",total:"Total",designType:"Design Type",designCost:"Design Cost",advance:"Advance",pending:"Pending",status:"Status",payMethod:"Payment",created:"Order Date & Time",deliveredAt:"Delivered",deliveredLocation:"Location"};
+  const labels={orderNum:"Order #",factoryOrder:"Factory",id:"Order ID",customer:"Customer",mobile:"Mobile",product:"Product",wood:"Wood",size:"Size",qty:"Qty",total:"Total",designType:"Design Type",designCost:"Design Cost",advance:"Advance",pending:"Pending",status:"Status",payMethod:"Payment",created:"Order Date & Time",deliveryCollectionLocation:"Collection Location",deliveredAt:"Delivered",deliveredLocation:"Location"};
   const fv=(k,v,o={})=>{
     if(k==="orderNum") return v?displayOrderNum(o,orders):"—";
+    if(k==="factoryOrder") return isFactoryOrder(o)?"F":"—";
+    if(k==="deliveryCollectionLocation") return collectionLocationOf(o);
     if(k==="created") return orderDateTime({created:v}).label;
     if(k==="total") return fmtM(orderTotalOf(o));
     if(k==="designType") return o.needsDesign?(v||"—"):"—";
@@ -3158,7 +3296,7 @@ function Reports({orders}){
             )}
           </div>
 
-          <Table rows={dayDeli} cols={["orderNum","created","id","customer","product","size","qty","designType","designCost","total","payMethod","deliveredLocation","deliveredAt"]}/>
+          <Table rows={dayDeli} cols={["orderNum","factoryOrder","created","id","customer","product","size","qty","designType","designCost","total","payMethod","deliveryCollectionLocation","deliveredLocation","deliveredAt"]}/>
         </div>
       )}
 
@@ -3225,11 +3363,11 @@ function Reports({orders}){
           <div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:12,padding:"11px 16px",marginBottom:14,fontWeight:700,color:"#cc0000",fontSize:14}}>
             Total Pending: {fmtM(pend.reduce((a,o)=>a+o.pending,0))}
           </div>
-          <Table rows={pend} cols={["orderNum","created","id","customer","mobile","size","designType","designCost","total","advance","pending","status"]}/>
+          <Table rows={pend} cols={["orderNum","factoryOrder","created","id","customer","mobile","size","deliveryCollectionLocation","designType","designCost","total","advance","pending","status"]}/>
         </div>
       )}
 
-      {tab==="delivered"&&<Table rows={deli} cols={["orderNum","created","id","customer","product","wood","size","qty","designType","designCost","total","payMethod","deliveredLocation","deliveredAt"]}/>}
+      {tab==="delivered"&&<Table rows={deli} cols={["orderNum","factoryOrder","created","id","customer","product","wood","size","qty","deliveryCollectionLocation","designType","designCost","total","payMethod","deliveredLocation","deliveredAt"]}/>}
 
       {tab==="customers"&&(
         <CustomerTab orders={orders} custQ={custQ} setCustQ={setCustQ}/>
