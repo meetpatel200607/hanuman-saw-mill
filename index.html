@@ -1800,9 +1800,11 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
     return String(o.customer||"").toLowerCase().includes(t)||
       String(o.mobile||"").includes(t)||
       String(o.id||"").toLowerCase().includes(t)||
+      String(o.product||"").toLowerCase().includes(t)||
       String(o.size||"").toLowerCase().includes(t)||
       String(o.wood||"").toLowerCase().includes(t)||
       String(o.designType||"").toLowerCase().includes(t)||
+      (o.oilPolish&&"oil polish op".includes(t))||
       matchesOrderNumber(o,t,allOrders||orders);
   };
   const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
@@ -1887,9 +1889,11 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
     const st=premiumStatus(o);
     return <span style={{display:"inline-flex",alignItems:"center",justifyContent:"center",background:st.bg,color:st.color,border:`1px solid ${st.border}`,borderRadius:999,padding:"5px 10px",fontSize:11.5,fontWeight:800,whiteSpace:"nowrap"}}>{st.label}</span>;
   };
-  const InfoChip=({icon,children,tone="#64748b"})=>children?(
-    <span style={{display:"inline-flex",alignItems:"center",gap:5,background:"#f8fafc",border:"1px solid #eef2f7",color:tone,borderRadius:999,padding:"5px 9px",fontSize:11.5,fontWeight:700}}>
-      {icon&&<i className={`ti ${icon}`} style={{fontSize:13}}/>}{children}
+  const DetailChip=({label,icon,children,tone="#475569",strong=false})=>children?(
+    <span style={{display:"inline-flex",alignItems:"center",gap:6,background:"#f8fafc",border:"1px solid #eef2f7",color:tone,borderRadius:999,padding:"6px 10px",fontSize:12,fontWeight:strong?850:720,lineHeight:1.15,maxWidth:"100%"}}>
+      {icon&&<i className={`ti ${icon}`} style={{fontSize:14,flexShrink:0}}/>}
+      {label&&<span style={{color:"#94a3b8",fontWeight:750}}>{label}</span>}
+      <span style={{minWidth:0,overflow:"hidden",textOverflow:"ellipsis"}}>{children}</span>
     </span>
   ):null;
   const designChips=o=>{
@@ -1899,6 +1903,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
     if(o.oilPolish&&!String(o.designType||"").includes("Oil")) chips.push("Oil Polish");
     return chips;
   };
+  const uniqueDesignChips=list=>[...new Set(list.flatMap(designChips).filter(Boolean))];
 
   // ── EDIT VIEW ──
   if(editTarget) return(
@@ -2048,18 +2053,18 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
     <div style={{maxWidth:1240,margin:"0 auto"}}>
       {histOrder&&<OrderHistoryPanel order={histOrder} onClose={()=>setHistOrder(null)}/>}
       {delTarget&&<DeleteConfirm order={delTarget} onCancel={()=>setDelTarget(null)} onConfirm={()=>{delOrder(delTarget.id);setDelTarget(null);}}/>}
-      <div style={{background:"#fff",border:"1px solid #edf0f4",borderRadius:16,padding:16,boxShadow:"0 12px 32px rgba(15,23,42,.06)",marginBottom:16}}>
-        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:14,flexWrap:"wrap",marginBottom:14}}>
+      <div className="orders-shell" style={{background:"#fff",border:"1px solid #edf0f4",borderRadius:16,padding:18,boxShadow:"0 16px 42px rgba(15,23,42,.07)",marginBottom:16}}>
+        <div className="orders-header" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:16,flexWrap:"wrap",marginBottom:16}}>
           <div>
-            <div style={{fontSize:20,fontWeight:850,color:"#0f172a",letterSpacing:0}}>All Orders</div>
+            <div style={{fontSize:22,fontWeight:900,color:"#0f172a",letterSpacing:0}}>All Orders</div>
             <div style={{fontSize:12,color:"#94a3b8",marginTop:3}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
           </div>
-          <div style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",flex:1,justifyContent:"flex-end"}}>
-            <div style={{position:"relative",flex:"1 1 300px",maxWidth:460}}>
+          <div className="orders-toolbar" style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",flex:1,justifyContent:"flex-end"}}>
+            <div className="orders-search" style={{position:"relative",flex:"1 1 330px",maxWidth:520}}>
               <i className="ti ti-search" style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",fontSize:15}}/>
-              <input className="inp" style={{paddingLeft:38,borderRadius:14,borderColor:"#e5e7eb",background:"#fbfcfe",height:42}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search customer, mobile, order #, ID, size, wood, design..."/>
+              <input className="inp" style={{paddingLeft:38,borderRadius:14,borderColor:"#e5e7eb",background:"#fbfcfe",height:44}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search customer, mobile, order #, ID, size, wood, design..."/>
             </div>
-            <select className="inp" style={{width:"auto",minWidth:185,borderRadius:14,borderColor:"#e5e7eb",background:"#fbfcfe",height:42}} value={fl} onChange={e=>setFl(e.target.value)}>
+            <select className="inp orders-filter" style={{width:"auto",minWidth:190,borderRadius:14,borderColor:"#e5e7eb",background:"#fbfcfe",height:44}} value={fl} onChange={e=>setFl(e.target.value)}>
               <option value="all">All Status</option>
               <option value={S.PEND}>Pending Factory Acceptance</option>
               <option value={S.PROD}>In Production</option>
@@ -2067,14 +2072,14 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
               <option value={S.RECV}>Received at Office</option>
               <option value={S.DELI}>Delivered & Paid</option>
             </select>
-            {isAdmin&&<button className="btn btn-outline" style={{height:42,borderRadius:14,borderColor:bulkMode?"#111827":"#e5e7eb",background:bulkMode?"#111827":"#fff",color:bulkMode?"#fff":"#334155"}} onClick={()=>{setBulkMode(p=>!p);setSelectedIds(new Set());}}>
+            {isAdmin&&<button className="btn btn-outline orders-select-btn" style={{height:44,borderRadius:14,borderColor:bulkMode?"#111827":"#e5e7eb",background:bulkMode?"#111827":"#fff",color:bulkMode?"#fff":"#334155"}} onClick={()=>{setBulkMode(p=>!p);setSelectedIds(new Set());}}>
               <i className="ti ti-checkbox"/>{bulkMode?"Cancel Select":"Select Orders"}
             </button>}
           </div>
         </div>
-        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(145px,1fr))",gap:10}}>
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(150px,1fr))",gap:10}}>
           {summary.map(([label,value,icon,color])=>(
-            <div key={label} style={{background:"#fbfcfe",border:"1px solid #eef2f7",borderRadius:14,padding:"12px 13px"}}>
+            <div key={label} style={{background:"#fbfcfe",border:"1px solid #eef2f7",borderRadius:14,padding:"13px 14px",boxShadow:"inset 0 1px 0 rgba(255,255,255,.8)"}}>
               <div style={{display:"flex",alignItems:"center",gap:7,color:"#64748b",fontSize:11.5,fontWeight:750,marginBottom:7}}>
                 <i className={`ti ${icon}`} style={{color,fontSize:15}}/>{label}
               </div>
@@ -2108,11 +2113,13 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
           const mixedStatus=allStatuses&&allStatuses.length>1;
           const allSizes=[...new Set(groupOrders.map(x=>x.size).filter(Boolean))];
           const allQty=groupOrders.reduce((a,x)=>a+Number(x.qty||0),0);
+          const allWoods=[...new Set(groupOrders.map(x=>x.wood).filter(Boolean))];
+          const designList=uniqueDesignChips(groupOrders);
           const cardBorder=today?"#86efac":hasMulti&&isExpanded?"#cbd5e1":"#edf0f4";
 
           return(
-            <div key={gid} style={{position:"relative",overflow:"hidden",background:today?"#f7fef9":"#fff",border:`1px solid ${cardBorder}`,borderLeft:`4px solid ${today?"#22c55e":"transparent"}`,borderRadius:16,boxShadow:"0 14px 36px rgba(15,23,42,.06)"}}>
-              <div style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:18,padding:"16px 18px",alignItems:"start"}}>
+            <div key={gid} className="order-card" style={{position:"relative",overflow:"hidden",background:today?"#f7fef9":"#fff",border:`1px solid ${cardBorder}`,borderLeft:`4px solid ${today?"#22c55e":"transparent"}`,borderRadius:16,boxShadow:"0 14px 36px rgba(15,23,42,.06)"}}>
+              <div className="order-card-grid" style={{display:"grid",gridTemplateColumns:"minmax(0,1fr) auto",gap:20,padding:"18px 20px",alignItems:"start"}}>
                 <div style={{display:"flex",gap:13,minWidth:0}}>
                   {isAdmin&&bulkMode&&(
                     <div onClick={()=>setSelectedIds(p=>{const ids=groupOrders.map(x=>x.id);const n=new Set(p);const allChosen=ids.every(id=>n.has(id));ids.forEach(id=>allChosen?n.delete(id):n.add(id));return n;})} style={{width:24,height:24,borderRadius:8,border:`2px solid ${groupOrders.every(x=>selectedIds.has(x.id))?"#111827":"#cbd5e1"}`,background:groupOrders.every(x=>selectedIds.has(x.id))?"#111827":"#fff",display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",flexShrink:0,marginTop:3}}>
@@ -2127,30 +2134,31 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
                       {hasMulti&&<span style={{background:"#f1f5f9",color:"#475569",border:"1px solid #e2e8f0",borderRadius:999,padding:"3px 8px",fontSize:10.5,fontWeight:800}}>{groupOrders.length} sizes</span>}
                     </div>
                     <div style={{fontSize:16,fontWeight:850,color:"#0f172a",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:3}}>{o.customer||"Unnamed Customer"}</div>
-                    <div style={{fontSize:11.5,color:"#94a3b8",display:"flex",gap:8,flexWrap:"wrap",marginBottom:9}}>
-                      {o.id&&<span>{o.id}</span>}
-                      {orderDateTime(o).label&&<span>{orderDateTime(o).label}</span>}
+                    <div style={{fontSize:11.5,color:"#94a3b8",display:"flex",gap:8,flexWrap:"wrap",marginBottom:10}}>
+                      {o.id&&<span>Order ID {o.id}</span>}
+                      {orderDateTime(o).label!=="—"&&<span>{orderDateTime(o).label}</span>}
                       {o.mobile&&<span>{o.mobile}</span>}
                     </div>
                     <div style={{display:"flex",gap:7,flexWrap:"wrap",alignItems:"center",marginBottom:9}}>
-                      <InfoChip icon="ti-map-pin" tone="#854f0b">{collectionLocationOf(o)!=="—"?collectionLocationOf(o):""}</InfoChip>
-                      <InfoChip icon="ti-tree" tone="#166534">{o.wood}</InfoChip>
-                      <InfoChip icon="ti-ruler" tone="#334155">{allSizes.length?allSizes.join(", "):""}</InfoChip>
-                      <InfoChip icon="ti-packages" tone="#334155">{allQty?`Qty ${allQty}`:""}</InfoChip>
+                      <DetailChip label="Location" icon="ti-map-pin" tone="#854f0b">{collectionLocationOf(o)!=="—"?collectionLocationOf(o):""}</DetailChip>
+                      <DetailChip label="Wood" icon="ti-tree" tone="#166534">{allWoods.length?allWoods.join(", "):""}</DetailChip>
+                      <DetailChip label="Size" icon="ti-ruler" tone="#334155" strong>{allSizes.length?allSizes.join(", "):""}</DetailChip>
+                      <DetailChip label="Qty" icon="ti-packages" tone="#334155">{allQty||""}</DetailChip>
                     </div>
                     <div style={{display:"flex",gap:7,flexWrap:"wrap"}}>
-                      {designChips(o).map(chip=><span key={chip} style={{display:"inline-flex",alignItems:"center",gap:5,background:"#fff7ed",border:"1px solid #fed7aa",color:"#c2410c",borderRadius:999,padding:"4px 9px",fontSize:11.5,fontWeight:800}}><i className="ti ti-pencil-ruler" style={{fontSize:13}}/>{chip}</span>)}
+                      {designList.map(chip=><span key={chip} style={{display:"inline-flex",alignItems:"center",gap:5,background:"#fff7ed",border:"1px solid #fed7aa",color:"#c2410c",borderRadius:999,padding:"4px 9px",fontSize:11.5,fontWeight:800}}><i className="ti ti-pencil-ruler" style={{fontSize:13}}/>{chip}</span>)}
                       {o.product&&<span style={{display:"inline-flex",alignItems:"center",gap:5,background:"#f8fafc",border:"1px solid #eef2f7",color:"#64748b",borderRadius:999,padding:"4px 9px",fontSize:11.5,fontWeight:700}}>{o.product}</span>}
                       {o.notes&&<span style={{display:"inline-flex",alignItems:"center",gap:5,background:"#fff1f2",border:"1px solid #ffe4e6",color:"#be123c",borderRadius:999,padding:"4px 9px",fontSize:11.5,fontWeight:700}}><i className="ti ti-note" style={{fontSize:13}}/>Notes</span>}
                     </div>
                     {isAdmin&&o.status===S.DELI&&o.deliveredAt&&(()=>{const daysLeft=Math.max(0,15-Math.floor((Date.now()-parseLocaleDateMs(o.deliveredAt))/(1000*60*60*24)));return <div style={{fontSize:10.5,color:daysLeft<=3?"#dc2626":"#94a3b8",marginTop:8,fontWeight:daysLeft<=3?800:600}}><i className="ti ti-clock" style={{marginRight:3}}/>Auto-delete in {daysLeft} day{daysLeft===1?"":"s"}</div>;})()}
                   </div>
                 </div>
-                <div style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:10,minWidth:190}}>
+                <div className="orders-right" style={{display:"flex",flexDirection:"column",alignItems:"flex-end",gap:10,minWidth:196}}>
                   {["Admin","Accountant"].includes(user.role)&&(
                     <div style={{textAlign:"right"}}>
-                      <div style={{fontSize:22,fontWeight:900,color:"#0f172a",lineHeight:1}}>{fmtM(groupTotal)}</div>
-                      {groupPending>0&&<div style={{fontSize:12,color:"#dc2626",fontWeight:800,marginTop:5}}>Due {fmtM(groupPending)}</div>}
+                      <div style={{fontSize:11,color:"#94a3b8",fontWeight:800,marginBottom:3}}>Total Amount</div>
+                      <div style={{fontSize:23,fontWeight:950,color:"#0f172a",lineHeight:1}}>{fmtM(groupTotal)}</div>
+                      <div style={{fontSize:12,color:groupPending>0?"#dc2626":"#047857",fontWeight:850,marginTop:6}}>Due {fmtM(groupPending)}</div>
                     </div>
                   )}
                   {mixedStatus
@@ -2211,7 +2219,22 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
           );
         })}
       </div>
-      <style>{`@media(max-width:760px){main{padding:14px!important}.orders-right{align-items:flex-start!important}}`}</style>
+      <style>{`
+        @media(max-width:920px){
+          .orders-header{align-items:flex-start!important}
+          .orders-toolbar{width:100%;justify-content:flex-start!important}
+          .orders-search{max-width:none!important;flex-basis:100%!important}
+          .orders-filter,.orders-select-btn{flex:1 1 180px;width:100%!important}
+        }
+        @media(max-width:760px){
+          main{padding:14px!important}
+          .orders-shell{padding:14px!important;border-radius:16px!important}
+          .order-card-grid{grid-template-columns:1fr!important;gap:14px!important;padding:16px!important}
+          .orders-right{align-items:flex-start!important;min-width:0!important;width:100%}
+          .orders-right>div{text-align:left!important}
+          .order-card{border-radius:16px!important}
+        }
+      `}</style>
     </div>
   );
 }
