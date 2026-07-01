@@ -100,28 +100,45 @@ const now2=()=>new Date().toLocaleString("en-IN");
 const fmtM=n=>"₹"+Number(n||0).toLocaleString("en-IN");
 const fmtD=d=>d?new Date(d).toLocaleDateString("en-IN"):"—";
 const fmtON=n=>n?"#"+String(n).padStart(3,"0"):"—";
+// Formats a bare order number with the correct prefix for its source — "#100" for Office, "F100" for Factory.
+const fmtONForSource=(n,source)=>n?(source==="Factory"?"F":"#")+String(n).padStart(3,"0"):"—";
 const collectionLocationOf=o=>o&&o.deliveryCollectionLocation?o.deliveryCollectionLocation:(o&&o.deliveredLocation?(o.deliveredLocation==="At Production"?"Factory Pickup":o.deliveredLocation==="At Office"?"Office Pickup":o.deliveredLocation):"—");
-const isFactoryOrder=o=>!!(o&&(o.createdFromFactory||o.orderSource==="Factory"||/factory/i.test(o.createdBy||"")));
+// Source of an order — "Factory" or "Office". Falls back to legacy fields for records created before orderSource existed.
+const orderSourceOf=o=>(o&&o.orderSource)?o.orderSource:(o&&o.createdFromFactory?"Factory":"Office");
+const isFactoryOrder=o=>orderSourceOf(o)==="Factory";
 const orderSuffixForIndex=i=>i>0?String.fromCharCode(65+i):"";
 const orderGroupIndex=(o,orders=[])=>{
   if(!o) return 0;
   const gid=o.groupId||o.id;
-  const group=orders.filter(x=>(x.groupId||x.id)===gid).sort((a,b)=>(a.created||"").localeCompare(b.created||"")||String(a.id).localeCompare(String(b.id)));
+  const group=orders.filter(x=>(x.groupId||x.id)===gid).sort((a,b)=>(parseLocaleDateMs(a.created)||0)-(parseLocaleDateMs(b.created)||0)||String(a.id).localeCompare(String(b.id)));
   const idx=group.findIndex(x=>x.id===o.id);
   return idx<0?0:idx;
 };
+// Displays the order number. Factory orders replace the "#" with "F" (e.g. F100) so Office #100 and Factory #100 are visually distinct everywhere.
 const displayOrderNum=(o,orders=[])=>{
   if(!o) return "—";
   const base=o.orderNum||sameOrderGroup(o,orders).find(x=>x.orderNum)?.orderNum;
   if(!base) return o.id||"—";
   const suffix=o.orderSuffix!==undefined&&o.orderSuffix!==null?o.orderSuffix:orderSuffixForIndex(orderGroupIndex(o,orders));
-  return fmtON(base)+(suffix||"");
+  const padded=String(base).padStart(3,"0")+(suffix||"");
+  return (isFactoryOrder(o)?"F":"#")+padded;
+};
+// Order numbers are unique per (orderNumber + orderSource) — an Office order and a Factory order can share the same number.
+// Orders sharing a groupId (multi-item orders created together) are exempt from colliding with each other.
+const orderNumberTaken=(num,source,orders,excludeOrderId,excludeGroupId)=>{
+  if(!num) return false;
+  return orders.some(o=>{
+    if(excludeOrderId&&o.id===excludeOrderId) return false;
+    const gid=o.groupId||o.id;
+    if(excludeGroupId&&gid===excludeGroupId) return false;
+    return o.orderNum===num&&orderSourceOf(o)===source;
+  });
 };
 const matchesOrderNumber=(o,text,orders=[])=>{
   const t=String(text||"").trim().toLowerCase();
   if(!o||!t||!o.orderNum) return false;
   const shown=displayOrderNum(o,orders).toLowerCase();
-  const raw=String(o.orderNum).toLowerCase()+String(o.orderSuffix||"").toLowerCase();
+  const raw=(isFactoryOrder(o)?"f":"")+String(o.orderNum).toLowerCase()+String(o.orderSuffix||"").toLowerCase();
   return String(o.orderNum)===t||fmtON(o.orderNum).toLowerCase()===t||("#"+String(o.orderNum))===t||shown===t||shown.replace("#","")===t||raw===t;
 };
 const designCostOf=o=>Number(o&&o.needsDesign?o.designCost:0)||0;
@@ -172,7 +189,7 @@ function normalizeOrderNumbers(list){
   });
   return list.map(o=>{
     const gid=o.groupId||o.id;
-    const group=(groups[gid]||[o]).slice().sort((a,b)=>(a.created||"").localeCompare(b.created||"")||String(a.id).localeCompare(String(b.id)));
+    const group=(groups[gid]||[o]).slice().sort((a,b)=>(parseLocaleDateMs(a.created)||0)-(parseLocaleDateMs(b.created)||0)||String(a.id).localeCompare(String(b.id)));
     const baseHolder=group.find(x=>x.orderNum);
     const base=baseHolder?baseHolder.orderNum:o.orderNum;
     const idx=group.findIndex(x=>x.id===o.id);
@@ -550,7 +567,7 @@ function App(){
   const toast2=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
 
   const addOrder=async o=>{
-    const dept=o.orderSource==="Factory"||o.createdFromFactory?"Factory":"Office";
+    const dept=orderSourceOf(o);
     const h1=makeHistoryEntry("Order Created",dept);
     // Brief pause to stagger timestamps
     const h2=makeHistoryEntry(dept==="Factory"?"Created at Factory":"Sent to Factory",dept);
@@ -559,36 +576,6 @@ function App(){
       try{await window.db.collection("orders").doc(o.id).set({...orderWithHistory,createdTs:firebase.firestore.FieldValue.serverTimestamp()});toast2("Order saved to cloud!");}
       catch(e){toast2("Save failed: "+e.message,"err");}
     }else{setOrders(p=>[orderWithHistory,...p]);toast2("Order created (local only)");}
-  };
-
-  const duplicateOrder=async source=>{
-    if(!source){toast2("Select an order to duplicate","err");return null;}
-    const used=orders.map(o=>o.orderNum).filter(Boolean);
-    const nextNum=used.length?Math.max(...used)+1:1;
-    const id=genId();
-    const factoryCreated=user.role==="Factory Staff";
-    const total=orderTotalOf(source);
-    const copy={
-      ...source,
-      id,orderNum:nextNum,orderSuffix:"",groupId:id,
-      status:S.PEND,created:now2(),createdBy:user.name,createdRole:user.role,
-      orderSource:factoryCreated?"Factory":"Office",createdFromFactory:factoryCreated,
-      advance:0,pending:total,
-      payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",
-      acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",
-      feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:"",
-      deleted:false,deletedAt:"",deletedBy:"",restoredAt:"",restoredBy:"",
-      whatsappConfirmationSent:false,whatsappConfirmationSentAt:"",
-      lastEditedAt:"",lastEditedBy:"",history:[]
-    };
-    copy.deliveryCollectionLocation=source.deliveryCollectionLocation||(
-      source.deliveredLocation==="At Production"?"Factory Pickup":
-      source.deliveredLocation==="At Office"?"Office Pickup":"Office Pickup"
-    );
-    delete copy.createdTs;
-    await addOrder(copy);
-    toast2("Duplicated as Order "+displayOrderNum(copy,[...orders,copy]));
-    return copy;
   };
 
   const updOrder=async(id,patch)=>{
@@ -712,9 +699,9 @@ function App(){
         {!dbMode&&<div style={{background:"#fffbea",borderBottom:"1px solid #ffe58f",padding:"8px 20px",fontSize:12,color:"#7a5c00",display:"flex",alignItems:"center",gap:8}}><i className="ti ti-alert-triangle" style={{fontSize:14}}/>Running in local mode — Firebase not configured.</div>}
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
-          {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto}/>}
-          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} duplicateOrder={duplicateOrder} toast2={toast2} user={user}/>}
-          {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} duplicateOrder={duplicateOrder} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
+          {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office"/>}
+          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user}/>}
+          {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
           {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2} user={user}/>}
           {page==="receive"&&<Receive orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="deliver"&&<Deliver orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
@@ -1121,8 +1108,8 @@ function OrderNumberEditor({order,orders,updOrder,user,toast2,onLocalUpdate,comp
     if(raw!==""&&(!next||next<1)){toast2("Enter a valid order number","err");setVal(order.orderNum?String(order.orderNum):"");return;}
     if(next===order.orderNum){setEditing(false);return;}
     const gid=order.groupId||order.id;
-    if(next&&orders.some(o=>o.id!==order.id&&o.orderNum===next&&(o.groupId||o.id)!==gid)){
-      toast2("Order number "+fmtON(next)+" already exists!","err");
+    if(orderNumberTaken(next,orderSourceOf(order),orders,order.id,gid)){
+      toast2("Order number "+fmtONForSource(next,orderSourceOf(order))+" already exists!","err");
       setVal(order.orderNum?String(order.orderNum):"");
       setEditing(false);
       return;
@@ -1253,7 +1240,8 @@ const LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBotto
 const emptyItem=()=>({product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",total:"",advance:"",advPayMethod:"Cash",notes:"",needsDesign:false,designType:"",designCost:"",oilPolish:false});
 const DRAFT_KEY="hsm_order_draft_v1";
 
-function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
+function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource}){
+  const orderSource=defaultSource||(user.role==="Factory Staff"?"Factory":"Office");
   const numberSource=allOrders||orders;
   const usedNums=numberSource.map(o=>o.orderNum).filter(Boolean);
   const suggestNum=usedNums.length>0?Math.max(...usedNums)+1:1;
@@ -1362,7 +1350,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
     if(!customer||!mobile){toast2("Enter customer name and mobile","err");return;}
     if(!deliveryCollectionLocation){toast2("Select Delivery Collection Location","err");return;}
     const num=parseInt(orderNumInput)||suggestNum;
-    if(numberSource.some(o=>o.orderNum===num)){toast2("Order number "+fmtON(num)+" already exists!","err");return;}
+    if(orderNumberTaken(num,orderSource,numberSource)){toast2("Order number "+fmtONForSource(num,orderSource)+" already exists!","err");return;}
     const created=[];
     for(let i=0;i<items.length;i++){
       const it=items[i];
@@ -1382,7 +1370,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
         notes:it.notes,
         needsDesign:!!it.needsDesign,designStatus:it.needsDesign?"Pending":"",designType:designTypeFull,designCost,oilPolish:!!it.oilPolish,
         status:S.PEND,created:now2(),createdBy:user.name,createdRole:user.role,
-        orderSource:user.role==="Factory Staff"?"Factory":"Office",createdFromFactory:user.role==="Factory Staff",
+        orderSource,createdFromFactory:orderSource==="Factory",
         payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",
         acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",
         feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:"",
@@ -1436,7 +1424,10 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
     <div style={{maxWidth:680,margin:"0 auto"}}>
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:8}}>
-          <div style={{fontWeight:700,fontSize:15}}>Create New Order</div>
+          <div style={{display:"flex",alignItems:"center",gap:8}}>
+            <div style={{fontWeight:700,fontSize:15}}>Create New Order</div>
+            {orderSource==="Factory"?<FactoryOrderBadge/>:<span title="Office order" style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:"50%",background:"#1a1a1a",color:"#fff",fontSize:11,fontWeight:900,border:"2px solid #cc0000",lineHeight:1}}>O</span>}
+          </div>
           <div style={{fontSize:10.5,color:"#bbb",display:"flex",alignItems:"center",gap:4}}><i className="ti ti-device-floppy"/>Draft auto-saved</div>
         </div>
         <form onSubmit={sub}>
@@ -1483,10 +1474,10 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto}){
               <div>
                 <label style={LBL}>Order Number *</label>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
-                  <span style={{fontWeight:700,color:"#cc0000",fontSize:16,flexShrink:0}}>#</span>
+                  <span style={{fontWeight:700,color:"#cc0000",fontSize:16,flexShrink:0}}>{orderSource==="Factory"?"F":"#"}</span>
                   <input ref={setRef("orderNum")} onKeyDown={onEnter("orderNum")} className="inp" type="number" value={orderNumInput} onChange={e=>setOrderNumInput(e.target.value)} placeholder={String(suggestNum)} style={{flex:1}}/>
                 </div>
-                <div style={{fontSize:10.5,color:"#bbb",marginTop:3}}>Suggested: {fmtON(suggestNum)} · Change if needed</div>
+                <div style={{fontSize:10.5,color:"#bbb",marginTop:3}}>Suggested: {fmtONForSource(suggestNum,orderSource)} · Change if needed</div>
               </div>
               <div><label style={LBL}>Delivery Date</label><input ref={setRef("delivery")} onKeyDown={onEnter("delivery")} type="date" className="inp" value={delivery} onChange={e=>setDelivery(e.target.value)}/></div>
               <div style={{gridColumn:"span 2"}}>
@@ -1656,7 +1647,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
     const nextNum=String(f.orderNum).trim()===""?null:parseInt(f.orderNum,10);
     if(String(f.orderNum).trim()!==""&&(!nextNum||nextNum<1)){toast2("Enter a valid order number","err");return;}
     const gid=order.groupId||order.id;
-    if(nextNum&&orders.some(o=>o.id!==order.id&&o.orderNum===nextNum&&(o.groupId||o.id)!==gid)){toast2("Order number "+fmtON(nextNum)+" already exists!","err");return;}
+    if(orderNumberTaken(nextNum,orderSourceOf(order),orders,order.id,gid)){toast2("Order number "+fmtONForSource(nextNum,orderSourceOf(order))+" already exists!","err");return;}
     const size=f.dimL+'"x'+f.dimW+'"x'+f.dimT+'"';
     const designTypeFull=f.needsDesign?(f.designType&&f.oilPolish?`${f.designType} + Oil Polish`:f.designType||(f.oilPolish?"Oil Polish":"")):"";
     onSave(order.id,{
@@ -1782,7 +1773,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
 }
 
 // ── ORDER LIST ──
-function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,duplicateOrder,toast2,user}){
+function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,toast2,user}){
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
   const [sel,setSel]=useState(null);
@@ -1857,8 +1848,8 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
       const g=groupMap[gid]||{primary:o,subs:[]};
       result.push(g);
     });
-    // Sort by primary's created desc (newest first)
-    result.sort((a,b)=>(b.primary.created||"").localeCompare(a.primary.created||""));
+    // Sort by real order date/time desc (newest first). String sorting breaks DD/M/YYYY dates.
+    result.sort((a,b)=>(parseLocaleDateMs(b.primary.created)||0)-(parseLocaleDateMs(a.primary.created)||0));
     return result;
   },[orders,q,fl]);
 
@@ -1983,7 +1974,6 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
             setSel({...sel,whatsappConfirmationSent:true,whatsappConfirmationSentAt:now2()});
             toast2("WhatsApp confirmation opened");
           }}><i className="ti ti-brand-whatsapp"/>Resend WhatsApp</button>
-          {["Admin","Factory Staff"].includes(user.role)&&<button className="btn btn-outline" onClick={async()=>{const copy=await duplicateOrder(sel);if(copy)setSel(copy);}}><i className="ti ti-copy"/>Duplicate</button>}
           {sel.status===S.DELI&&<button className="btn btn-outline" onClick={()=>printInvoice(sel)}><i className="ti ti-file-invoice"/>Invoice</button>}
         </div>
 
@@ -2168,7 +2158,6 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,d
                     <button className="btn" title="WhatsApp" style={{padding:"8px 11px",fontSize:12,background:"#16a34a",color:"#fff",borderRadius:12,boxShadow:"0 8px 18px rgba(22,163,74,.18)"}} onClick={e=>{e.stopPropagation();sendWhatsApp(sameOrderGroup(o,orders));updOrder(o.id,{whatsappConfirmationSent:true,whatsappConfirmationSentAt:now2()});toast2("WhatsApp confirmation opened");}}><i className="ti ti-brand-whatsapp"/>WhatsApp</button>
                     {hasMulti&&<button title={isExpanded?"Collapse sizes":"Expand sizes"} style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#475569"}} onClick={e=>{e.stopPropagation();toggleGroup(gid);}}><i className={`ti ${isExpanded?"ti-chevron-up":"ti-chevron-down"}`} style={{fontSize:16}}/></button>}
                     <button title="More" style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#475569"}} onClick={e=>{e.stopPropagation();setHistOrder(o);}}><i className="ti ti-dots-vertical" style={{fontSize:17}}/></button>
-                    {["Admin","Factory Staff"].includes(user.role)&&<button title="Duplicate Order" style={{background:"#fff",border:"1px solid #e5e7eb",borderRadius:12,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#475569"}} onClick={e=>{e.stopPropagation();duplicateOrder(o);}}><i className="ti ti-copy" style={{fontSize:16}}/></button>}
                     {isAdmin&&<button title="Move to Trash" style={{background:"#fff7f7",border:"1px solid #fecaca",borderRadius:12,width:36,height:36,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#dc2626"}} onClick={e=>{e.stopPropagation();doDelete(o);}}><i className="ti ti-trash" style={{fontSize:16}}/></button>}
                   </div>
                 </div>
@@ -2279,11 +2268,14 @@ function DispatchModal({order,onConfirm,onCancel,toast2}){
 }
 
 // ── FACTORY ──
-function Factory({orders,allOrders,delOrder,updOrder,updOrderH,duplicateOrder,user,onAdd,toast2,goto}){
-  const pendAccept=orders.filter(o=>o.status===S.PEND);
-  const inProd=orders.filter(o=>o.status===S.PROD);
-  const inTransit=orders.filter(o=>o.status===S.TRANSIT);
-  const active=[...pendAccept,...inProd,...inTransit];
+function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2,goto}){
+  // Office-placed orders still go through the full factory production workflow (Accept → Production → Dispatch).
+  // Factory-sourced orders bypass that workflow entirely — they only support Delivered & Paid.
+  const pendAccept=orders.filter(o=>!isFactoryOrder(o)&&o.status===S.PEND);
+  const inProd=orders.filter(o=>!isFactoryOrder(o)&&o.status===S.PROD);
+  const inTransit=orders.filter(o=>!isFactoryOrder(o)&&o.status===S.TRANSIT);
+  const factoryAwaitingDelivery=orders.filter(o=>isFactoryOrder(o)&&o.status!==S.DELI);
+  const active=[...pendAccept,...inProd,...inTransit,...factoryAwaitingDelivery];
   const [sel,setSel]=useState(null);
   const [delTarget,setDelTarget]=useState(null);
   const [dispatchTarget,setDispatchTarget]=useState(null);
@@ -2308,9 +2300,9 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,duplicateOrder,us
   };
   const markFactoryDelivered=o=>{
     if(o.status===S.DELI){toast2("Already delivered","err");return;}
-    // Auto-accept if still Pending
+    // Auto-accept if an Office-workflow order was still Pending (Factory-sourced orders never enter that workflow)
     let extraPatch={};
-    if(o.status===S.PEND){extraPatch={acceptedAt:now2(),acceptedBy:user.name};}
+    if(!isFactoryOrder(o)&&o.status===S.PEND){extraPatch={acceptedAt:now2(),acceptedBy:user.name};}
     const h=makeHistoryEntry("Delivered at Factory","Factory");
     const patch={status:S.DELI,pending:0,payMethod:"Direct Factory Pickup",payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:"At Production",...extraPatch};
     updOrderH(o.id,patch,h);
@@ -2330,7 +2322,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,duplicateOrder,us
   if(showNewOrder) return(
     <div>
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setShowNewOrder(false)}>← Back to Factory View</button>
-      <NewOrder user={user} onAdd={onAdd} toast2={toast2} orders={orders} allOrders={allOrders||orders} goto={goto||(()=>setShowNewOrder(false))}/>
+      <NewOrder user={user} onAdd={onAdd} toast2={toast2} orders={orders} allOrders={allOrders||orders} goto={goto||(()=>setShowNewOrder(false))} defaultSource="Factory"/>
     </div>
   );
 
@@ -2397,12 +2389,11 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,duplicateOrder,us
           {sel.notes&&<div style={{gridColumn:"span 2",background:"#fff8f8",borderRadius:9,padding:"9px 11px",border:"1px solid #ffe0e0"}}><div style={{fontSize:10,color:"#cc0000",marginBottom:2}}>Notes</div><div style={{fontSize:12}}>{sel.notes}</div></div>}
         </div>
         <div style={{display:"flex",gap:10,justifyContent:"center",flexWrap:"wrap"}}>
-          {sel.status===S.PEND&&<button className="btn btn-green" style={{fontSize:14}} onClick={()=>acceptOrder(sel)}><i className="ti ti-check"/>Accept Order</button>}
-          {sel.status===S.PROD&&<button className="btn" style={{background:"#6a1bb5",color:"#fff",fontSize:14}} onClick={()=>setDispatchTarget(sel)}><i className="ti ti-truck"/>Dispatch</button>}
-          {sel.status!==S.DELI&&<button className="btn btn-green" style={{fontSize:14}} onClick={()=>markFactoryDelivered(sel)}><i className="ti ti-package-export"/>Deliver at Factory{sel.status===S.PEND?" (Auto-Accept)":""}</button>}
-          {sel.status===S.TRANSIT&&<div style={{padding:"10px 16px",background:"#f0e6fb",borderRadius:10,color:"#6a1bb5",fontWeight:600,fontSize:13}}><i className="ti ti-truck" style={{marginRight:6}}/>In Transit since {sel.dispatchedAt}</div>}
+          {!isFactoryOrder(sel)&&sel.status===S.PEND&&<button className="btn btn-green" style={{fontSize:14}} onClick={()=>acceptOrder(sel)}><i className="ti ti-check"/>Accept Order</button>}
+          {!isFactoryOrder(sel)&&sel.status===S.PROD&&<button className="btn" style={{background:"#6a1bb5",color:"#fff",fontSize:14}} onClick={()=>setDispatchTarget(sel)}><i className="ti ti-truck"/>Dispatch</button>}
+          {sel.status!==S.DELI&&<button className="btn btn-green" style={{fontSize:14}} onClick={()=>markFactoryDelivered(sel)}><i className="ti ti-package-export"/>Deliver at Factory{!isFactoryOrder(sel)&&sel.status===S.PEND?" (Auto-Accept)":""}</button>}
+          {!isFactoryOrder(sel)&&sel.status===S.TRANSIT&&<div style={{padding:"10px 16px",background:"#f0e6fb",borderRadius:10,color:"#6a1bb5",fontWeight:600,fontSize:13}}><i className="ti ti-truck" style={{marginRight:6}}/>In Transit since {sel.dispatchedAt}</div>}
           <button className="btn btn-outline" style={{fontSize:13}} onClick={()=>setHistOrder(sel)}><i className="ti ti-history"/>History</button>
-          <button className="btn btn-outline" style={{fontSize:13}} onClick={async()=>{const copy=await duplicateOrder(sel);if(copy)setSel(copy);}}><i className="ti ti-copy"/>Duplicate</button>
           <button className="btn btn-red" onClick={()=>printQR(sel)}><i className="ti ti-printer"/>Print QR</button>
           {user.role==="Admin"&&<button className="btn btn-danger" onClick={()=>setDelTarget(sel)}><i className="ti ti-trash"/>Trash</button>}
         </div>
@@ -2442,7 +2433,6 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,duplicateOrder,us
             </div>
             <div style={{display:"flex",gap:6,flexShrink:0,flexWrap:"wrap"}}>
               {!qrSelectMode&&renderAction(o)}
-              {!qrSelectMode&&<button className="btn btn-outline" title="Duplicate Order" style={{padding:"6px 10px",fontSize:12}} onClick={e=>{e.stopPropagation();duplicateOrder(o);}}><i className="ti ti-copy"/></button>}
               {!qrSelectMode&&user.role==="Admin"&&<button className="btn btn-danger" title="Move to Trash" style={{padding:"6px 10px",fontSize:12}} onClick={e=>{e.stopPropagation();setDelTarget(o);}}><i className="ti ti-trash"/></button>}
             </div>
           </div>
@@ -2563,6 +2553,9 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,duplicateOrder,us
 
       <Section title="In Transit" color="#6a1bb5" list={inTransit} emptyMsg="Nothing currently in transit"
         renderAction={o=><span style={{fontSize:11,color:"#6a1bb5",fontWeight:600,padding:"7px 10px"}}><i className="ti ti-truck" style={{marginRight:4}}/>On the way</span>}/>
+
+      <Section title="Factory Orders — Awaiting Delivery" color="#1d9e75" list={factoryAwaitingDelivery} emptyMsg="No factory orders awaiting delivery"
+        renderAction={o=><button className="btn btn-green" style={{padding:"7px 12px",fontSize:12}} onClick={e=>{e.stopPropagation();markFactoryDelivered(o);}}><i className="ti ti-package-export"/>Deliver</button>}/>
     </div>
   );
 }
@@ -2585,6 +2578,7 @@ function Receive({orders,updOrder,updOrderH,user,toast2}){
 
   const search=()=>{const o=findByText(mid);o?setFound(o):toast2("Order not found","err");};
   const markRecv=()=>{
+    if(isFactoryOrder(found)){toast2("Factory orders skip Receive/Scan — deliver them from Factory View","err");return;}
     if(found.status===S.RECV||found.status===S.DELI){toast2("Already received","err");return;}
     if(found.status===S.PEND){toast2("Order not yet accepted by factory","err");return;}
     if(found.status===S.PROD){toast2("Order not yet dispatched from factory","err");return;}
@@ -2630,7 +2624,9 @@ function Receive({orders,updOrder,updOrderH,user,toast2}){
             </div>
           </div>
           <div style={{marginBottom:14}}><StatusBadge s={found.status}/></div>
-          {found.status===S.TRANSIT
+          {isFactoryOrder(found)
+            ?<div style={{padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:600,fontSize:13,textAlign:"center"}}>🏭 Factory order — skips Receive/Scan. Deliver it from Factory View.</div>
+            :found.status===S.TRANSIT
             ?<button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:15}} onClick={markRecv}><i className="ti ti-check"/>Mark as Received at Office</button>
             :found.status===S.PEND
             ?<div style={{padding:12,background:"#ffe9e9",borderRadius:10,color:"#cc0000",fontWeight:600,fontSize:13,textAlign:"center"}}>⏳ Order not yet accepted by factory</div>
@@ -2674,6 +2670,7 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
     else toast2("Order not found","err");
   };
   const markDel=()=>{
+    if(isFactoryOrder(found)){toast2("Factory orders are delivered from Factory View","err");return;}
     if(found.status===S.PEND){toast2("Order not yet accepted by factory","err");return;}
     const pendFinal=pt==="full"?0:pt==="partial"?Math.max(0,found.pending-Number(partial)):found.pending;
     const updatedOrder={...found,status:S.DELI,pending:pendFinal,payMethod:pm,payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:loc};
@@ -2756,7 +2753,7 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
             <div style={{fontSize:11,color:"#854f0b",fontWeight:600,marginTop:2}}><i className="ti ti-map-pin" style={{marginRight:3}}/>{collectionLocationOf(found)}</div>
             <div style={{fontSize:12,color:"#777",marginTop:2}}>{found.product} · {found.wood} · <b className="size-strong-sm">{found.size}</b> · Qty {found.qty}</div>
           </div>
-          {found.status===S.PEND&&<div style={{padding:12,background:"#ffe9e9",borderRadius:10,color:"#cc0000",fontWeight:600,fontSize:13,textAlign:"center",marginBottom:13}}>⏳ Order not yet accepted by factory</div>}
+          {!isFactoryOrder(found)&&found.status===S.PEND&&<div style={{padding:12,background:"#ffe9e9",borderRadius:10,color:"#cc0000",fontWeight:600,fontSize:13,textAlign:"center",marginBottom:13}}>⏳ Order not yet accepted by factory</div>}
           <div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:12,padding:13,marginBottom:13}}>
             <div style={{fontSize:12,fontWeight:700,color:"#cc0000",marginBottom:8}}>Payment Summary</div>
             {[["Total Amount",fmtM(orderTotalOf(found))],["Advance Paid",fmtM(found.advance)],["Pending Amount",fmtM(found.pending)]].map(([k,v])=>(
@@ -2792,6 +2789,8 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
           </div>
           {found.status===S.DELI
             ?<div style={{padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:600,textAlign:"center",fontSize:13}}>✓ Already Delivered & Paid</div>
+            :isFactoryOrder(found)
+            ?<div style={{padding:12,background:"#fff3e0",borderRadius:10,color:"#a35a00",fontWeight:600,textAlign:"center",fontSize:13}}>🏭 Factory order — deliver it from Factory View</div>
             :found.status===S.PEND
             ?<button className="btn btn-outline" style={{width:"100%",justifyContent:"center",fontSize:15,opacity:.5,cursor:"not-allowed"}} disabled><i className="ti ti-truck-delivery"/>Mark Delivered & Print Invoice</button>
             :<button className="btn btn-red" style={{width:"100%",justifyContent:"center",fontSize:15}} onClick={markDel}><i className="ti ti-truck-delivery"/>Mark Delivered & Print Invoice</button>}
@@ -2984,14 +2983,29 @@ function parseLocaleDate(str){
   const [d,m,y]=bits;
   return {d,m,y,dateKey:`${y}-${String(m).padStart(2,"0")}-${String(d).padStart(2,"0")}`,monthKey:`${y}-${String(m).padStart(2,"0")}`,monthLabel:new Date(y,m-1,1).toLocaleDateString("en-IN",{month:"long",year:"numeric"})};
 }
-// Returns milliseconds timestamp for an en-IN locale datetime string
+// Returns milliseconds timestamp for an en-IN locale datetime string "DD/M/YYYY, h:mm:ss am/pm"
+// Parses BOTH date and time so orders created on the same day still sort correctly (newest first).
 function parseLocaleDateMs(str){
   if(!str) return null;
-  const datePart=str.split(",")[0].trim();
+  const parts=str.split(",");
+  const datePart=(parts[0]||"").trim();
   const bits=datePart.split("/").map(Number);
   if(bits.length!==3||bits.some(isNaN)) return null;
   const [d,m,y]=bits;
-  return new Date(y,m-1,d).getTime();
+  let hh=0,mm=0,ss=0;
+  const timePart=parts.slice(1).join(",").trim();
+  if(timePart){
+    const timeMatch=timePart.match(/(\d{1,2}):(\d{2}):?(\d{2})?\s*(am|pm)?/i);
+    if(timeMatch){
+      hh=Number(timeMatch[1])||0;
+      mm=Number(timeMatch[2])||0;
+      ss=Number(timeMatch[3])||0;
+      const ampm=(timeMatch[4]||"").toLowerCase();
+      if(ampm==="pm"&&hh<12) hh+=12;
+      if(ampm==="am"&&hh===12) hh=0;
+    }
+  }
+  return new Date(y,m-1,d,hh,mm,ss).getTime();
 }
 const todayKey=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
 
