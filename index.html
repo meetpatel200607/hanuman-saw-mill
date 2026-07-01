@@ -2338,6 +2338,18 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
     toast2("Order found: "+displayOrderNum(o,orders));
   },[orders,toast2]);
 
+  const [scanMid,setScanMid]=useState("");
+  const findOrderByText=useCallback(text=>{
+    const t=text.trim();
+    if(!t) return null;
+    return orders.find(x=>x.id===t||x.mobile===t||matchesOrderNumber(x,t,orders));
+  },[orders]);
+  const searchScanDispatch=()=>{
+    const o=findOrderByText(scanMid);
+    if(o){setScanResult(o);toast2("Order found: "+displayOrderNum(o,orders));}
+    else toast2("Order not found","err");
+  };
+
   if(showNewOrder) return(
     <div>
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setShowNewOrder(false)}>← Back to Factory View</button>
@@ -2482,7 +2494,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
             <i className="ti ti-checkbox"/>
             {qrSelectMode?"Cancel QR Select":"Select QR to Print"}
           </button>
-          <button className="btn" style={{background:"#1d9e75",color:"#fff"}} onClick={()=>{setShowScanDispatch(p=>!p);setScanResult(null);}}>
+          <button className="btn" style={{background:"#1d9e75",color:"#fff"}} onClick={()=>{setShowScanDispatch(p=>!p);setScanResult(null);setScanMid("");}}>
             <i className="ti ti-qrcode"/>Scan & Deliver
           </button>
           <button className="btn btn-red" onClick={()=>setShowNewOrder(true)}>
@@ -2510,7 +2522,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
               <div style={{fontWeight:700,fontSize:15,color:"#1d9e75"}}><i className="ti ti-qrcode" style={{marginRight:6}}/>Factory Scan & Deliver</div>
               <div style={{fontSize:11,color:"#888",marginTop:2}}>For customers picking up directly from the factory</div>
             </div>
-            <button onClick={()=>{setShowScanDispatch(false);setScanResult(null);}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
+            <button onClick={()=>{setShowScanDispatch(false);setScanResult(null);setScanMid("");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
           </div>
 
           {!scanResult?(
@@ -2519,6 +2531,15 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
                 Scan the customer's order QR code. You can mark it delivered directly from here — no need to route through the Office.
               </div>
               <QRScanner onResult={onScanDispatch} onError={()=>toast2("Camera error","err")}/>
+              <div style={{display:"flex",alignItems:"center",gap:10,margin:"14px 0"}}>
+                <div style={{flex:1,height:1,background:"#eee"}}/>
+                <span style={{fontSize:11,color:"#bbb",flexShrink:0}}>OR SEARCH MANUALLY</span>
+                <div style={{flex:1,height:1,background:"#eee"}}/>
+              </div>
+              <div style={{display:"flex",gap:8}}>
+                <input className="inp" value={scanMid} onChange={e=>setScanMid(e.target.value)} placeholder="Order #, Order ID or Mobile" onKeyDown={e=>e.key==="Enter"&&searchScanDispatch()}/>
+                <button className="btn btn-red" onClick={searchScanDispatch}><i className="ti ti-search"/></button>
+              </div>
             </>
           ):(
             <>
@@ -2547,7 +2568,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
               </div>
 
               <div style={{display:"flex",gap:10}}>
-                <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={()=>{setScanResult(null);}}>
+                <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={()=>{setScanResult(null);setScanMid("");}}>
                   <i className="ti ti-arrow-back-up"/>Scan Again
                 </button>
                 {scanResult.status===S.PROD&&<button className="btn" style={{flex:1,justifyContent:"center",background:"#6a1bb5",color:"#fff",fontSize:15}} onClick={doScanDispatch}>
