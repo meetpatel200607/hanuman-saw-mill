@@ -2228,12 +2228,22 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   );
 }
 
-// ── DISPATCH CONFIRM MODAL (scan QR + confirm to mark In Transit) ──
-function DispatchModal({order,onConfirm,onCancel,toast2}){
+// ── DISPATCH CONFIRM MODAL (scan QR or enter order # / ID to confirm and mark In Transit) ──
+function DispatchModal({order,orders,onConfirm,onCancel,toast2}){
   const [scanned,setScanned]=useState(false);
+  const [mid,setMid]=useState("");
+  const checkMatch=text=>{
+    const t=String(text||"").trim();
+    if(!t) return false;
+    return t===order.id||t===order.mobile||matchesOrderNumber(order,t,orders||[]);
+  };
   const onScan=text=>{
-    if(text.trim()===order.id){setScanned(true);toast2("QR matched!");}
+    if(checkMatch(text)){setScanned(true);toast2("QR matched!");}
     else toast2("This QR doesn't match this order","err");
+  };
+  const searchMid=()=>{
+    if(checkMatch(mid)){setScanned(true);toast2("Order matched!");}
+    else toast2("That order # / ID doesn't match this order","err");
   };
   return(
     <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
@@ -2252,10 +2262,19 @@ function DispatchModal({order,onConfirm,onCancel,toast2}){
           <>
             <div style={{fontSize:12.5,color:"#777",marginBottom:10}}>Scan this order's QR code to confirm it's being loaded for transport.</div>
             <QRScanner onResult={onScan} onError={()=>toast2("Camera error","err")}/>
+            <div style={{display:"flex",alignItems:"center",gap:10,margin:"14px 0"}}>
+              <div style={{flex:1,height:1,background:"#eee"}}/>
+              <span style={{fontSize:11,color:"#bbb",flexShrink:0}}>OR ENTER ORDER #/ID</span>
+              <div style={{flex:1,height:1,background:"#eee"}}/>
+            </div>
+            <div style={{display:"flex",gap:8}}>
+              <input className="inp" value={mid} onChange={e=>setMid(e.target.value)} placeholder="Order #, Order ID or Mobile" onKeyDown={e=>e.key==="Enter"&&searchMid()}/>
+              <button className="btn btn-red" onClick={searchMid}><i className="ti ti-search"/></button>
+            </div>
           </>
         ):(
           <div style={{padding:14,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:600,fontSize:13,textAlign:"center",marginBottom:14}}>
-            <i className="ti ti-circle-check" style={{marginRight:6}}/>QR Scanned & Matched
+            <i className="ti ti-circle-check" style={{marginRight:6}}/>Order Matched & Confirmed
           </div>
         )}
         <div style={{display:"flex",gap:10,marginTop:14}}>
@@ -2370,7 +2389,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
     <div style={{maxWidth:440,margin:"0 auto"}}>
       {histOrder&&<OrderHistoryPanel order={histOrder} onClose={()=>setHistOrder(null)}/>}
       {delTarget&&<DeleteConfirm order={delTarget} onCancel={()=>setDelTarget(null)} onConfirm={()=>{delOrder(delTarget.id);setDelTarget(null);setSel(null);}}/>}
-      {dispatchTarget&&<DispatchModal order={dispatchTarget} toast2={toast2} onCancel={()=>setDispatchTarget(null)} onConfirm={()=>confirmDispatch(dispatchTarget)}/>}
+      {dispatchTarget&&<DispatchModal order={dispatchTarget} orders={orders} toast2={toast2} onCancel={()=>setDispatchTarget(null)} onConfirm={()=>confirmDispatch(dispatchTarget)}/>}
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setSel(null)}>← Back</button>
       <div className="card" style={{textAlign:"center"}}>
         <div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2,display:"flex",alignItems:"center",justifyContent:"center",gap:8,flexWrap:"wrap"}}>
@@ -2453,7 +2472,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
   return(
     <div>
       {delTarget&&<DeleteConfirm order={delTarget} onCancel={()=>setDelTarget(null)} onConfirm={()=>{delOrder(delTarget.id);setDelTarget(null);}}/>}
-      {dispatchTarget&&<DispatchModal order={dispatchTarget} toast2={toast2} onCancel={()=>setDispatchTarget(null)} onConfirm={()=>confirmDispatch(dispatchTarget)}/>}
+      {dispatchTarget&&<DispatchModal order={dispatchTarget} orders={orders} toast2={toast2} onCancel={()=>setDispatchTarget(null)} onConfirm={()=>confirmDispatch(dispatchTarget)}/>}
 
       {/* ── Top action bar ── */}
       <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:10}}>
