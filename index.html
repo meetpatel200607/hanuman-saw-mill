@@ -786,9 +786,12 @@ function Dashboard({orders,goto,user}){
   const todayDelivered=orders.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===tKey;});
   const todayAdvOrders=todayOrders.filter(o=>Number(o.advance)>0);
   const sales=todayOrders.reduce((a,o)=>a+orderTotalOf(o),0);
-  const cashCollected=todayDelivered.filter(o=>o.payMethod==="Cash").reduce((a,o)=>a+orderTotalOf(o),0)+todayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash").reduce((a,o)=>a+Number(o.advance||0),0);
-  const upiCollected=todayDelivered.filter(o=>o.payMethod==="UPI").reduce((a,o)=>a+orderTotalOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod==="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
-  const otherCollected=todayDelivered.filter(o=>o.payMethod&&o.payMethod!=="Cash"&&o.payMethod!=="UPI").reduce((a,o)=>a+orderTotalOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod&&o.advPayMethod!=="Cash"&&o.advPayMethod!=="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
+  // Revenue = Cash + UPI + Other Payments actually received today (product amount only — Design Revenue is tracked separately below and must not be mixed in here).
+  const cashCollected=todayDelivered.filter(o=>o.payMethod==="Cash").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash").reduce((a,o)=>a+Number(o.advance||0),0);
+  const upiCollected=todayDelivered.filter(o=>o.payMethod==="UPI").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod==="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
+  const otherCollected=todayDelivered.filter(o=>o.payMethod&&o.payMethod!=="Cash"&&o.payMethod!=="UPI").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod&&o.advPayMethod!=="Cash"&&o.advPayMethod!=="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
+  // Today's Revenue = Cash + UPI + Other Payments. Each payment (a delivery payment or an advance) is counted exactly once, in whichever bucket matches its payment method.
+  const todayRevenue=cashCollected+upiCollected+otherCollected;
   const pendingOrders=orders.filter(o=>o.status!==S.DELI).length;
   const completedToday=todayDelivered.length;
   const prod=orders.filter(o=>o.status===S.PROD).length;
@@ -832,16 +835,17 @@ function Dashboard({orders,goto,user}){
         <div className="card" style={{marginBottom:16,background:"#1a1a1a",border:"none",color:"#fff"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap",marginBottom:16}}>
             <div>
-              <div style={{fontSize:11,color:"#ffb3b3",fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>Today's Business Summary</div>
-              <div style={{fontSize:32,fontWeight:900,marginTop:4,color:"#fff"}}>{fmtM(sales)}</div>
-              <div style={{fontSize:12,color:"#bbb",marginTop:2}}>{todayOrders.length} orders · {totalQty} items</div>
+              <div style={{fontSize:11,color:"#ffb3b3",fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>Today's Revenue</div>
+              <div style={{fontSize:32,fontWeight:900,marginTop:4,color:"#fff"}}>{fmtM(todayRevenue)}</div>
+              <div style={{fontSize:10.5,color:"#777",marginTop:3}}>Today's Revenue = Cash + UPI + Other Payments</div>
+              <div style={{fontSize:12,color:"#bbb",marginTop:4}}>{todayOrders.length} orders · {totalQty} items</div>
             </div>
             <button className="btn btn-red" onClick={()=>goto("reports")}><i className="ti ti-report"/>Full Reports</button>
           </div>
 
           {/* Payment breakdown row */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:1,background:"#333",borderRadius:10,overflow:"hidden",marginBottom:12}}>
-            {[["💵 Cash",cashCollected,"#e8f5e9","#0f6e56"],["📱 UPI",upiCollected,"#e3f2fd","#185fa5"],["🏦 Other",otherCollected,"#fafafa","#555"]].map(([l,v,bg,c])=>(
+            {[["💵 Cash",cashCollected,"#e8f5e9","#0f6e56"],["📱 UPI",upiCollected,"#e3f2fd","#185fa5"],["🏦 Other Payments",otherCollected,"#fafafa","#555"]].map(([l,v,bg,c])=>(
               <div key={l} style={{background:"#252525",padding:"10px 12px",textAlign:"center"}}>
                 <div style={{fontSize:10.5,color:"#888",marginBottom:3}}>{l}</div>
                 <div style={{fontSize:16,fontWeight:700,color:"#fff"}}>{fmtM(v)}</div>
@@ -866,12 +870,12 @@ function Dashboard({orders,goto,user}){
             <div style={{background:"#252525",borderRadius:10,padding:"10px 12px"}}>
               <div style={{fontSize:10.5,color:"#888",marginBottom:2}}>Today's Advances</div>
               <div style={{fontSize:16,fontWeight:700,color:"#fff"}}>{fmtM(todayAdvOrders.reduce((a,o)=>a+Number(o.advance||0),0))}</div>
-              <div style={{fontSize:10.5,color:"#666",marginTop:2}}>{todayAdvOrders.length} orders</div>
+              <div style={{fontSize:10.5,color:"#666",marginTop:2}}>{todayAdvOrders.length} orders · already included in Revenue above</div>
             </div>
             <div style={{background:"#252525",borderRadius:10,padding:"10px 12px"}}>
               <div style={{fontSize:10.5,color:"#888",marginBottom:2}}>Today's Pending Due</div>
               <div style={{fontSize:16,fontWeight:700,color:todayPendingAmt>0?"#ff6b6b":"#aaa"}}>{fmtM(todayPendingAmt)}</div>
-              <div style={{fontSize:10.5,color:"#666",marginTop:2}}>Total outstanding: {fmtM(totalPendingAmt)}</div>
+              <div style={{fontSize:10.5,color:"#666",marginTop:2}}>Informational only — not part of Revenue · Total outstanding: {fmtM(totalPendingAmt)}</div>
             </div>
           </div>
         </div>
@@ -1924,7 +1928,10 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   const todayKeyNow=todayKey();
   const isTodayOrder=o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===todayKeyNow;};
   const todayOrders=orders.filter(isTodayOrder);
-  const todayRevenue=todayOrders.reduce((a,o)=>a+orderTotalOf(o),0);
+  // Today's Revenue = Cash + UPI + Other Payments received today (excludes Design Revenue), same definition as the Dashboard — payments received today only, each counted once.
+  const todayDeliveredOL=orders.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===todayKeyNow;});
+  const todayAdvOrdersOL=todayOrders.filter(o=>Number(o.advance)>0);
+  const todayRevenue=todayDeliveredOL.reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrdersOL.reduce((a,o)=>a+Number(o.advance||0),0);
   const summary=[
     ["Today's Orders",todayOrders.length,"ti-calendar-plus","#0f766e"],
     ["Pending",orders.filter(o=>o.status===S.PEND).length,"ti-clock-pause","#dc2626"],
