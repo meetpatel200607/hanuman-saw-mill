@@ -189,6 +189,16 @@ const sameOrderGroup=(o,orders)=>{
   const group=orders.filter(x=>(x.groupId||x.id)===gid);
   return group.length?group:[o];
 };
+// All members of an order's group (all size/sub-item variants), sorted oldest-first (primary item first).
+const groupMembers=(o,orders)=>sameOrderGroup(o,orders).slice().sort((a,b)=>(parseLocaleDateMs(a.created)||0)-(parseLocaleDateMs(b.created)||0)||String(a.id).localeCompare(String(b.id)));
+// Resolve scanned QR text (now the group id) or a manually typed order#/ID/mobile to the FULL order group —
+// every size/sub-item that belongs to that order — so a single scan surfaces everything for that order.
+const findGroupByText=(text,orders)=>{
+  const t=String(text||"").trim();
+  if(!t) return null;
+  const o=orders.find(x=>x.id===t||x.groupId===t||x.mobile===t||matchesOrderNumber(x,t,orders));
+  return o?groupMembers(o,orders):null;
+};
 function normalizeOrderNumbers(list){
   const groups={};
   list.forEach(o=>{
@@ -214,8 +224,9 @@ const SEED=[
   {id:"HSM-DEMO3",orderNum:3,customer:"Deepak Verma",mobile:"9123456789",product:"Plank",wood:"Pine",size:'1"x6"x12',qty:100,advance:8000,pending:0,total:8000,delivery:"2026-05-10",notes:"",status:S.DELI,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"UPI",payMethod:"UPI",payAt:now2(),receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:now2(),deliveredBy:"Ravi Kumar",deliveredLocation:"At Office",acceptedAt:now2(),acceptedBy:"Suresh Factory",dispatchedAt:now2(),dispatchedBy:"Suresh Factory",feedbackSent:true,feedbackSentAt:now2(),customerRating:5,customerReviewText:""},
 ];
 
-// QR encodes ONLY the order ID — short = simple = easy to scan
-function buildQRText(o){return o.id;}
+// QR encodes ONLY the order's GROUP id (the primary/diary number's id) — one QR represents the WHOLE
+// order, including every size/sub-item variant (38, 38B, 38C, ...). No more per-size QR codes.
+function buildQRText(o){return o.groupId||o.id;}
 
 function drawQROnCanvas(canvas,text,size){
   try{
@@ -1450,20 +1461,26 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource}){
           </button>}
         </div>
 
-        <div style={{display:"flex",flexDirection:"column",gap:12,marginBottom:16}}>
+        {/* ── Item summary — every size/sub-item in this order, no separate QR each ── */}
+        <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:16,textAlign:"left"}}>
           {done.map((o,i)=>(
             <div key={o.id} style={{background:"#fafaf8",borderRadius:12,padding:12}}>
-              <div style={{fontSize:12,fontWeight:700,color:"#cc0000",marginBottom:4}}>{o.orderNum?`Order ${displayOrderNum(o,done)} · `:""}{o.id}</div>
+              <div style={{fontSize:12,fontWeight:700,color:"#cc0000",marginBottom:4}}>{o.orderNum?`Order ${displayOrderNum(o,done)}`:o.id}</div>
               <div style={{fontSize:12,color:"#777",marginBottom:8}}>{o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b> · Qty {o.qty}</div>
-              <div style={{fontSize:11,color:"#854f0b",fontWeight:700,marginBottom:8}}><i className="ti ti-map-pin" style={{marginRight:4}}/>{collectionLocationOf(o)}{isFactoryOrder(o)&&<span style={{marginLeft:8}}><FactoryOrderBadge/></span>}</div>
-              {o.needsDesign&&<div style={{display:"inline-block",background:"#fff3e0",color:"#a35a00",border:"1px solid #ffd9a0",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,marginBottom:8}}><i className="ti ti-pencil-ruler" style={{marginRight:4}}/>{o.designType||"Design"} · {fmtM(o.designCost)}</div>}
-              <div style={{background:"#fff",borderRadius:10,padding:8,display:"inline-block"}}><QRSvg order={o} size={140}/></div>
-              <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:8,flexWrap:"wrap"}}>
-                <button className="btn btn-red" style={{padding:"7px 12px",fontSize:12}} onClick={()=>printQR(o)}><i className="ti ti-printer"/>Print</button>
-                <button className="btn btn-green" style={{padding:"7px 12px",fontSize:12}} onClick={()=>downloadQR(o)}><i className="ti ti-download"/>Download</button>
-              </div>
+              <div style={{fontSize:11,color:"#854f0b",fontWeight:700}}><i className="ti ti-map-pin" style={{marginRight:4}}/>{collectionLocationOf(o)}{isFactoryOrder(o)&&<span style={{marginLeft:8}}><FactoryOrderBadge/></span>}</div>
+              {o.needsDesign&&<div style={{display:"inline-block",background:"#fff3e0",color:"#a35a00",border:"1px solid #ffd9a0",borderRadius:8,padding:"3px 10px",fontSize:11,fontWeight:700,marginTop:8}}><i className="ti ti-pencil-ruler" style={{marginRight:4}}/>{o.designType||"Design"} · {fmtM(o.designCost)}</div>}
             </div>
           ))}
+        </div>
+
+        {/* ── ONE QR for the whole order — covers every size/sub-item above ── */}
+        <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:16}}>
+          <div style={{fontSize:11,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Order QR Code {done.length>1?`(covers all ${done.length} items)`:""}</div>
+          <div style={{background:"#fff",borderRadius:10,padding:8,display:"inline-block"}}><QRSvg order={done[0]} size={160}/></div>
+          <div style={{display:"flex",gap:8,justifyContent:"center",marginTop:10,flexWrap:"wrap"}}>
+            <button className="btn btn-red" style={{padding:"7px 12px",fontSize:12}} onClick={()=>printQR(done[0])}><i className="ti ti-printer"/>Print</button>
+            <button className="btn btn-green" style={{padding:"7px 12px",fontSize:12}} onClick={()=>downloadQR(done[0])}><i className="ti ti-download"/>Download</button>
+          </div>
         </div>
         <button className="btn btn-outline" onClick={()=>{setDone(null);setCustomer("");setMobile("");setDelivery(todayKey());setDeliveryCollectionLocation("");setOrderNumInput(String(suggestNum+1));setItems([emptyItem()]);clearDraft();}}><i className="ti ti-plus"/>New Order</button>
       </div>
@@ -1649,7 +1666,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource}){
           </button>
 
           <button ref={setRef("submit")} type="submit" className="btn btn-red" style={{width:"100%",justifyContent:"center",fontSize:15}}>
-            <i className="ti ti-check"/>Create {items.length>1?`${items.length} Orders`:"Order"} & Generate QR{items.length>1?"s":""}
+            <i className="ti ti-check"/>Create {items.length>1?`Order (${items.length} Sizes)`:"Order"} & Generate QR
           </button>
         </form>
       </div>
@@ -2027,6 +2044,24 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
           {sel.status===S.DELI&&<button className="btn btn-outline" onClick={()=>printInvoice(sel)}><i className="ti ti-file-invoice"/>Invoice</button>}
         </div>
 
+        {/* ── Other sizes sharing this order's single QR ── */}
+        {sameOrderGroup(sel,orders).length>1&&(
+          <div style={{marginTop:18,paddingTop:18,borderTop:"1px solid #f0ede8"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Other Sizes In This Order (same QR)</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {groupMembers(sel,orders).filter(x=>x.id!==sel.id).map(o=>(
+                <div key={o.id} style={{background:"#fafaf8",borderRadius:10,padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",cursor:"pointer"}} onClick={()=>setSel(o)}>
+                  <div>
+                    <div style={{fontSize:12.5,fontWeight:700}}>{displayOrderNum(o,orders)} · <b className="size-strong-sm">{o.size}</b></div>
+                    <div style={{fontSize:11,color:"#999"}}>{o.product} · {o.wood} · Qty {o.qty}</div>
+                  </div>
+                  <StatusBadge s={o.status}/>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
         {/* ── Feedback section — only for Delivered & Paid orders ── */}
         {sel.status===S.DELI&&(
           <div style={{marginTop:18,paddingTop:18,borderTop:"1px solid #f0ede8"}}>
@@ -2285,7 +2320,7 @@ function DispatchModal({order,orders,onConfirm,onCancel,toast2}){
   const checkMatch=text=>{
     const t=String(text||"").trim();
     if(!t) return false;
-    return t===order.id||t===order.mobile||matchesOrderNumber(order,t,orders||[]);
+    return t===order.id||t===(order.groupId||order.id)||t===order.mobile||matchesOrderNumber(order,t,orders||[]);
   };
   const onScan=text=>{
     if(checkMatch(text)){setScanned(true);toast2("QR matched!");}
@@ -2380,23 +2415,18 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
     setSel(null);setScanResult(null);setShowScanDispatch(false);
   };
 
+  // Scanning the single order QR now loads every size/sub-item belonging to that order.
   const onScanDispatch=useCallback(text=>{
-    const id=text.trim();
-    const o=orders.find(x=>x.id===id);
-    if(!o){toast2("QR scanned but order not found","err");return;}
-    setScanResult(o);
-    toast2("Order found: "+displayOrderNum(o,orders));
+    const g=findGroupByText(text,orders);
+    if(!g||!g.length){toast2("QR scanned but order not found","err");return;}
+    setScanResult(g);
+    toast2("Order found: "+displayOrderNum(g[0],orders)+(g.length>1?` (${g.length} items)`:""));
   },[orders,toast2]);
 
   const [scanMid,setScanMid]=useState("");
-  const findOrderByText=useCallback(text=>{
-    const t=text.trim();
-    if(!t) return null;
-    return orders.find(x=>x.id===t||x.mobile===t||matchesOrderNumber(x,t,orders));
-  },[orders]);
   const searchScanDispatch=()=>{
-    const o=findOrderByText(scanMid);
-    if(o){setScanResult(o);toast2("Order found: "+displayOrderNum(o,orders));}
+    const g=findGroupByText(scanMid,orders);
+    if(g&&g.length){setScanResult(g);toast2("Order found: "+displayOrderNum(g[0],orders));}
     else toast2("Order not found","err");
   };
 
@@ -2478,6 +2508,22 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
           <button className="btn btn-red" onClick={()=>printQR(sel)}><i className="ti ti-printer"/>Print QR</button>
           {user.role==="Admin"&&<button className="btn btn-danger" onClick={()=>setDelTarget(sel)}><i className="ti ti-trash"/>Trash</button>}
         </div>
+        {groupMembers(sel,orders).length>1&&(
+          <div style={{marginTop:18,textAlign:"left"}}>
+            <div style={{fontSize:11,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:8}}>Other Sizes In This Order</div>
+            <div style={{display:"flex",flexDirection:"column",gap:8}}>
+              {groupMembers(sel,orders).filter(x=>x.id!==sel.id).map(o=>(
+                <div key={o.id} className="card" style={{padding:"10px 12px",display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",cursor:"pointer"}} onClick={()=>setSel(o)}>
+                  <div>
+                    <div style={{fontSize:12.5,fontWeight:700}}>{displayOrderNum(o,orders)} · <b className="size-strong-sm">{o.size}</b></div>
+                    <div style={{fontSize:11,color:"#999"}}>Qty {o.qty}</div>
+                  </div>
+                  <StatusBadge s={o.status}/>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );
@@ -2522,13 +2568,25 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
     </div>
   );
 
-  const doScanDispatch=()=>{
-    if(!scanResult) return;
+  const doScanDispatchItem=o=>{
     const h=makeHistoryEntry("Dispatched","Factory");
-    updOrderH(scanResult.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name},h);
-    toast2("Order "+displayOrderNum(scanResult,orders)+" marked In Transit!");
-    setScanResult(null);
-    setShowScanDispatch(false);
+    updOrderH(o.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name},h);
+    toast2("Order "+displayOrderNum(o,orders)+" marked In Transit!");
+    setScanResult(g=>g&&g.map(x=>x.id===o.id?{...x,status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name}:x));
+  };
+  const doScanDispatchAll=()=>{
+    const items=scanResult.filter(o=>o.status===S.PROD);
+    items.forEach(o=>{
+      const h=makeHistoryEntry("Dispatched","Factory");
+      updOrderH(o.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name},h);
+    });
+    toast2(`${items.length} item${items.length===1?"":"s"} marked In Transit!`);
+    setScanResult(null);setShowScanDispatch(false);
+  };
+  const markFactoryDeliveredAll=()=>{
+    const items=scanResult.filter(o=>o.status!==S.DELI);
+    items.forEach(markFactoryDelivered);
+    setScanResult(null);setShowScanDispatch(false);
   };
 
   return(
@@ -2559,7 +2617,12 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
           <div style={{color:"#fff",fontSize:13,fontWeight:600}}><i className="ti ti-checkbox" style={{marginRight:6,color:"#cc0000"}}/>{selectedQRIds.size} order{selectedQRIds.size===1?"":"s"} selected</div>
           <div style={{display:"flex",gap:8}}>
             <button className="btn btn-outline" style={{fontSize:12,color:"#bbb",borderColor:"#555"}} onClick={()=>setSelectedQRIds(new Set())}>Clear</button>
-            <button className="btn btn-red" style={{fontSize:13}} onClick={()=>{const chosen=active.filter(o=>selectedQRIds.has(o.id));printMultiQR(chosen);}}><i className="ti ti-printer"/>Print {selectedQRIds.size} QR{selectedQRIds.size===1?"":"s"}</button>
+            <button className="btn btn-red" style={{fontSize:13}} onClick={()=>{
+              const chosen=active.filter(o=>selectedQRIds.has(o.id));
+              // One QR label per order — dedupe by group so a multi-size order only prints once.
+              const seen=new Set();const dedupedChosen=chosen.filter(o=>{const gid=o.groupId||o.id;if(seen.has(gid))return false;seen.add(gid);return true;});
+              printMultiQR(dedupedChosen);
+            }}><i className="ti ti-printer"/>Print {selectedQRIds.size} QR{selectedQRIds.size===1?"":"s"}</button>
           </div>
         </div>
       )}
@@ -2593,42 +2656,43 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
             </>
           ):(
             <>
-              {/* ── Matched order card ── */}
+              {/* ── Matched order — every size/sub-item from this one QR ── */}
               <div style={{background:"#e8f9f2",border:"1.5px solid #7dd8b5",borderRadius:12,padding:14,marginBottom:14}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:8,marginBottom:10}}>
                   <div>
-                    <div style={{fontSize:20,fontWeight:900,color:"#0f6e56",marginBottom:2}}>
-                      <OrderNumberEditor order={scanResult} orders={orders} updOrder={updOrder} user={user} toast2={toast2} onLocalUpdate={setScanResult}/>
-                    </div>
-                    <div style={{fontSize:11,color:"#999",marginBottom:4}}>{scanResult.id}</div>
-                    <div style={{fontWeight:700,fontSize:15}}>{scanResult.customer}</div>
-                    <div style={{fontSize:12,color:"#777"}}>{scanResult.mobile}</div>
+                    <div style={{fontSize:20,fontWeight:900,color:"#0f6e56",marginBottom:2}}>{displayOrderNum(scanResult[0],orders)}{scanResult.length>1?` — ${scanResult.length} items`:""}</div>
+                    <div style={{fontWeight:700,fontSize:15}}>{scanResult[0].customer}</div>
+                    <div style={{fontSize:12,color:"#777"}}>{scanResult[0].mobile}</div>
                   </div>
-                  <StatusBadge s={scanResult.status}/>
                 </div>
-                <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:8,marginTop:12}}>
-                  {[["Product",scanResult.product],["Wood",scanResult.wood],["Size",scanResult.size],["Qty",scanResult.qty],["Order Date",orderDateTime(scanResult).date],["Order Time",orderDateTime(scanResult).time],["Delivery",fmtD(scanResult.delivery)],["Collection",collectionLocationOf(scanResult)]].map(([k,v])=>(
-                    <div key={k} style={{background:k==="Size"?"#d9f5ec":"#fff",borderRadius:8,padding:"8px 10px",gridColumn:k==="Size"?"span 3":undefined,border:k==="Size"?"1.5px solid #7dd8b5":"none"}}>
-                      <div style={{fontSize:10,color:"#bbb",marginBottom:2}}>{k}</div>
-                      <div className={k==="Size"?"size-strong":""} style={{fontWeight:700,fontSize:12.5,color:"#1a1a1a"}}>{v}</div>
+                <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                  {scanResult.map(o=>(
+                    <div key={o.id} style={{background:"#fff",border:"1.5px solid #7dd8b5",borderRadius:10,padding:12}}>
+                      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:8,flexWrap:"wrap",marginBottom:6}}>
+                        <div style={{fontSize:13,fontWeight:700}}>{displayOrderNum(o,orders)} · <b className="size-strong-sm">{o.size}</b></div>
+                        <StatusBadge s={o.status}/>
+                      </div>
+                      <div style={{fontSize:12,color:"#777",marginBottom:8}}>{o.product} · {o.wood} · Qty {o.qty}</div>
+                      <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+                        {o.status===S.PROD&&<button className="btn" style={{padding:"6px 12px",fontSize:12,background:"#6a1bb5",color:"#fff"}} onClick={()=>doScanDispatchItem(o)}><i className="ti ti-truck"/>Mark In Transit</button>}
+                        {o.status!==S.DELI&&<button className="btn btn-green" style={{padding:"6px 12px",fontSize:12}} onClick={()=>markFactoryDelivered(o)}><i className="ti ti-package-export"/>Deliver{o.status===S.PEND?" (Auto-Accept)":""}</button>}
+                        {o.status===S.DELI&&<span style={{fontSize:11.5,color:"#0f6e56",fontWeight:700}}><i className="ti ti-circle-check" style={{marginRight:4}}/>Already Delivered</span>}
+                      </div>
                     </div>
                   ))}
                 </div>
-                {scanResult.notes&&<div style={{marginTop:10,background:"#fff8f8",borderRadius:8,padding:"8px 10px",fontSize:12,color:"#a35a00"}}>📝 {scanResult.notes}</div>}
               </div>
 
-              <div style={{display:"flex",gap:10}}>
+              <div style={{display:"flex",gap:10,flexWrap:"wrap"}}>
                 <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={()=>{setScanResult(null);setScanMid("");}}>
                   <i className="ti ti-arrow-back-up"/>Scan Again
                 </button>
-                {scanResult.status===S.PROD&&<button className="btn" style={{flex:1,justifyContent:"center",background:"#6a1bb5",color:"#fff",fontSize:15}} onClick={doScanDispatch}>
-                  <i className="ti ti-truck"/>Mark In Transit
+                {scanResult.filter(o=>o.status===S.PROD).length>1&&<button className="btn" style={{flex:1,justifyContent:"center",background:"#6a1bb5",color:"#fff",fontSize:14}} onClick={doScanDispatchAll}>
+                  <i className="ti ti-truck"/>Mark All In Transit
                 </button>}
-                {scanResult.status!==S.DELI&&<button className="btn btn-green" style={{flex:1,justifyContent:"center",fontSize:15,fontWeight:700}} onClick={()=>markFactoryDelivered(scanResult)}>
-                  <i className="ti ti-package-export"/>Mark Delivered{scanResult.status===S.PEND?" (Auto-Accept)":""}
+                {scanResult.filter(o=>o.status!==S.DELI).length>1&&<button className="btn btn-green" style={{flex:1,justifyContent:"center",fontSize:14,fontWeight:700}} onClick={markFactoryDeliveredAll}>
+                  <i className="ti ti-package-export"/>Deliver All
                 </button>}
-                {scanResult.status===S.PEND&&<div style={{flex:2,padding:12,background:"#fff3e0",borderRadius:10,color:"#a35a00",fontWeight:700,textAlign:"center",fontSize:12}}>⚠️ Auto-accept & deliver will run together</div>}
-                {scanResult.status===S.DELI&&<div style={{flex:2,padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:700,textAlign:"center",fontSize:13}}><i className="ti ti-circle-check" style={{marginRight:6}}/>Already Delivered</div>}
               </div>
             </>
           )}
@@ -2651,35 +2715,48 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
 }
 
 // ── RECEIVE ──
+// A single QR now represents the WHOLE order — scanning/searching loads every size/sub-item at once
+// so staff can review and receive each of them (or all of them together) from this one screen.
 function Receive({orders,updOrder,updOrderH,user,toast2}){
-  const [found,setFound]=useState(null);
+  const [foundGroup,setFoundGroup]=useState(null); // array of all sub-items belonging to the scanned order
   const [mid,setMid]=useState("");
 
-  const findByText=useCallback(text=>{
-    const t=text.trim();
-    return orders.find(x=>x.id===t||x.mobile===t||matchesOrderNumber(x,t,orders));
-  },[orders]);
-
   const onScan=useCallback(text=>{
-    const o=findByText(text);
-    if(o){setFound(o);toast2("Order found: "+displayOrderNum(o,orders));}
+    const g=findGroupByText(text,orders);
+    if(g&&g.length){setFoundGroup(g);toast2("Order found: "+displayOrderNum(g[0],orders)+(g.length>1?` (${g.length} items)`:""));}
     else toast2("QR scanned but order not found: "+text,"err");
-  },[findByText,toast2]);
+  },[orders,toast2]);
 
-  const search=()=>{const o=findByText(mid);o?setFound(o):toast2("Order not found","err");};
-  const markRecv=()=>{
-    if(isFactoryOrder(found)){toast2("Factory orders skip Receive/Scan — deliver them from Factory View","err");return;}
-    if(found.status===S.RECV||found.status===S.DELI){toast2("Already received","err");return;}
-    if(found.status===S.PEND){toast2("Order not yet accepted by factory","err");return;}
-    if(found.status===S.PROD){toast2("Order not yet dispatched from factory","err");return;}
-    const h=makeHistoryEntry("Received at Office","Office");
-    updOrderH(found.id,{status:S.RECV,receivedAt:now2(),receivedBy:user.name},h);
-    toast2("Marked as Received!");setFound(null);setMid("");
+  const search=()=>{
+    const g=findGroupByText(mid,orders);
+    if(g&&g.length)setFoundGroup(g);else toast2("Order not found","err");
   };
 
+  const receivable=o=>!isFactoryOrder(o)&&o.status===S.TRANSIT;
+  const markRecvOne=o=>{
+    const h=makeHistoryEntry("Received at Office","Office");
+    updOrderH(o.id,{status:S.RECV,receivedAt:now2(),receivedBy:user.name},h);
+  };
+  const markRecvItem=o=>{
+    if(isFactoryOrder(o)){toast2("Factory orders skip Receive/Scan — deliver them from Factory View","err");return;}
+    if(o.status===S.RECV||o.status===S.DELI){toast2("Already received","err");return;}
+    if(o.status===S.PEND){toast2("Order not yet accepted by factory","err");return;}
+    if(o.status===S.PROD){toast2("Order not yet dispatched from factory","err");return;}
+    markRecvOne(o);
+    toast2("Marked as Received!");
+    setFoundGroup(g=>g&&g.map(x=>x.id===o.id?{...x,status:S.RECV,receivedAt:now2(),receivedBy:user.name}:x));
+  };
+  const markRecvAll=()=>{
+    const items=foundGroup.filter(receivable);
+    items.forEach(markRecvOne);
+    toast2(`Marked ${items.length} item${items.length===1?"":"s"} as Received!`);
+    setFoundGroup(null);setMid("");
+  };
+
+  const primary=foundGroup&&foundGroup[0];
   return(
-    <div style={{maxWidth:500,margin:"0 auto"}}>
-      {!found&&(
+    <div style={{maxWidth:560,margin:"0 auto"}}>
+      {!foundGroup&&(
         <div className="card">
           <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>Scan QR Code to Receive</div>
           <QRScanner onResult={onScan} onError={()=>toast2("Camera error","err")}/>
@@ -2694,35 +2771,46 @@ function Receive({orders,updOrder,updOrderH,user,toast2}){
           </div>
         </div>
       )}
-      {found&&(
+      {foundGroup&&(
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontWeight:700,fontSize:16}}>Order Found</div>
-            <button onClick={()=>{setFound(null);setMid("");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
+            <div style={{fontWeight:700,fontSize:16}}>Order Found{foundGroup.length>1?` — ${foundGroup.length} items`:""}</div>
+            <button onClick={()=>{setFoundGroup(null);setMid("");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
           </div>
           <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:14}}>
             <div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>
-              <OrderNumberEditor order={found} orders={orders} updOrder={updOrder} user={user} toast2={toast2} onLocalUpdate={setFound}/>
+              <OrderNumberEditor order={primary} orders={orders} updOrder={updOrder} user={user} toast2={toast2} onLocalUpdate={o=>setFoundGroup(g=>g.map(x=>x.id===primary.id?o:x))}/>
             </div>
-            <div style={{fontSize:11,color:"#aaa",marginBottom:4}}>{found.id}</div>
-            <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>{found.customer}</div>
-            <div style={{fontSize:13,color:"#999",marginBottom:12}}>{found.mobile}</div>
-            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12.5}}>
-              {[["Product",found.product],["Wood",found.wood],["Size",found.size],["Qty",found.qty],["Order Date",orderDateTime(found).date],["Order Time",orderDateTime(found).time],["Collection",collectionLocationOf(found)],["Total",fmtM(orderTotalOf(found))],["Pending",fmtM(found.pending)]].map(([k,v])=>(
-                <div key={k} style={{background:k==="Size"?"#f5f0e8":"transparent",borderRadius:k==="Size"?8:0,padding:k==="Size"?"6px 8px":0,gridColumn:k==="Size"?"span 2":undefined,border:k==="Size"?"1.5px solid #d5cfc4":"none"}}><span style={{color:"#bbb"}}>{k}: </span><b className={k==="Size"?"size-strong":""}>{v}</b></div>
-              ))}
-            </div>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>{primary.customer}</div>
+            <div style={{fontSize:13,color:"#999"}}>{primary.mobile}</div>
           </div>
-          <div style={{marginBottom:14}}><StatusBadge s={found.status}/></div>
-          {isFactoryOrder(found)
-            ?<div style={{padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:600,fontSize:13,textAlign:"center"}}>🏭 Factory order — skips Receive/Scan. Deliver it from Factory View.</div>
-            :found.status===S.TRANSIT
-            ?<button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:15}} onClick={markRecv}><i className="ti ti-check"/>Mark as Received at Office</button>
-            :found.status===S.PEND
-            ?<div style={{padding:12,background:"#ffe9e9",borderRadius:10,color:"#cc0000",fontWeight:600,fontSize:13,textAlign:"center"}}>⏳ Order not yet accepted by factory</div>
-            :found.status===S.PROD
-            ?<div style={{padding:12,background:"#faeeda",borderRadius:10,color:"#854f0b",fontWeight:600,fontSize:13,textAlign:"center"}}>🛠 Still in production — not dispatched yet</div>
-            :<div style={{padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:600,fontSize:13,textAlign:"center"}}>✓ Already Received – {found.receivedAt}</div>}
+          <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
+            {foundGroup.map(o=>(
+              <div key={o.id} style={{border:"1px solid #eeebe6",borderRadius:10,padding:12}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                  <div>
+                    <div style={{fontSize:13,fontWeight:700}}>{displayOrderNum(o,orders)} · <b className="size-strong-sm">{o.size}</b></div>
+                    <div style={{fontSize:11.5,color:"#999"}}>{o.product} · {o.wood} · Qty {o.qty}</div>
+                  </div>
+                  <StatusBadge s={o.status}/>
+                </div>
+                <div style={{marginTop:8}}>
+                  {isFactoryOrder(o)
+                    ?<div style={{padding:8,background:"#e1f5ee",borderRadius:8,color:"#0f6e56",fontWeight:600,fontSize:12,textAlign:"center"}}>🏭 Factory order — deliver from Factory View</div>
+                    :o.status===S.TRANSIT
+                    ?<button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:13}} onClick={()=>markRecvItem(o)}><i className="ti ti-check"/>Mark as Received</button>
+                    :o.status===S.PEND
+                    ?<div style={{padding:8,background:"#ffe9e9",borderRadius:8,color:"#cc0000",fontWeight:600,fontSize:12,textAlign:"center"}}>⏳ Not yet accepted by factory</div>
+                    :o.status===S.PROD
+                    ?<div style={{padding:8,background:"#faeeda",borderRadius:8,color:"#854f0b",fontWeight:600,fontSize:12,textAlign:"center"}}>🛠 Still in production</div>
+                    :<div style={{padding:8,background:"#e1f5ee",borderRadius:8,color:"#0f6e56",fontWeight:600,fontSize:12,textAlign:"center"}}>✓ Already Received – {o.receivedAt}</div>}
+                </div>
+              </div>
+            ))}
+          </div>
+          {foundGroup.filter(receivable).length>1&&(
+            <button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:15}} onClick={markRecvAll}><i className="ti ti-checks"/>Mark All {foundGroup.filter(receivable).length} Items Received</button>
+          )}
         </div>
       )}
     </div>
@@ -2730,8 +2818,11 @@ function Receive({orders,updOrder,updOrderH,user,toast2}){
 }
 
 // ── DELIVER ──
+// A single QR represents the whole order — scanning/searching loads every size/sub-item so staff can
+// pick any (or all) of them to deliver & collect payment from this one screen.
 function Deliver({orders,updOrder,updOrderH,user,toast2}){
-  const [found,setFound]=useState(null);
+  const [foundGroup,setFoundGroup]=useState(null); // all sub-items belonging to the scanned order
+  const [found,setFound]=useState(null); // the specific item currently being paid/delivered
   const [mid,setMid]=useState("");
   const [pm,setPm]=useState("Cash");
   const [pt,setPt]=useState("full");
@@ -2739,26 +2830,20 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
   const [loc,setLoc]=useState("At Office");
   const [justDelivered,setJustDelivered]=useState(null); // holds the completed order right after delivery
 
-  const findByText=useCallback(text=>{
-    const t=text.trim();
-    return orders.find(x=>x.id===t||x.mobile===t||matchesOrderNumber(x,t,orders));
-  },[orders]);
+  const openItem=o=>{setFound(o);setLoc(o.status===S.RECV||o.status===S.DELI?"At Office":"At Production");setPt("full");setPartial("");};
 
   const onScan=useCallback(text=>{
-    const o=findByText(text);
-    if(o){
-      setFound(o);
-      setLoc(o.status===S.RECV||o.status===S.DELI?"At Office":"At Production");
-      toast2("Order found: "+displayOrderNum(o,orders));
-    }
+    const g=findGroupByText(text,orders);
+    if(g&&g.length){setFoundGroup(g);toast2("Order found: "+displayOrderNum(g[0],orders)+(g.length>1?` (${g.length} items)`:""));}
     else toast2("QR scanned but order not found: "+text,"err");
-  },[findByText,toast2]);
+  },[orders,toast2]);
 
   const search=()=>{
-    const o=findByText(mid);
-    if(o){setFound(o);setLoc(o.status===S.RECV||o.status===S.DELI?"At Office":"At Production");}
-    else toast2("Order not found","err");
+    const g=findGroupByText(mid,orders);
+    if(g&&g.length)setFoundGroup(g);else toast2("Order not found","err");
   };
+
+  const deliverableFull=o=>!isFactoryOrder(o)&&o.status!==S.DELI&&o.status!==S.PEND;
   const markDel=()=>{
     if(isFactoryOrder(found)){toast2("Factory orders are delivered from Factory View","err");return;}
     if(found.status===S.PEND){toast2("Order not yet accepted by factory","err");return;}
@@ -2769,7 +2854,18 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
     toast2("Delivered & Paid!");
     setTimeout(()=>printInvoice(updatedOrder),400);
     setJustDelivered(updatedOrder);
-    setFound(null);setMid("");setPt("full");setPartial("");setLoc("At Office");
+    setFound(null);setFoundGroup(null);setMid("");setPt("full");setPartial("");setLoc("At Office");
+  };
+  const markDelAllFull=()=>{
+    const items=foundGroup.filter(deliverableFull);
+    items.forEach(o=>{
+      const h=makeHistoryEntry("Delivered","Delivery");
+      updOrderH(o.id,{status:S.DELI,pending:0,payMethod:pm,payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:loc},h);
+    });
+    toast2(`Marked ${items.length} item${items.length===1?"":"s"} Delivered & Paid!`);
+    setTimeout(()=>printInvoice({...items[0],status:S.DELI,pending:0,payMethod:pm,deliveredAt:now2()}),400);
+    setJustDelivered({...items[0],status:S.DELI,pending:0,payMethod:pm,deliveredAt:now2()});
+    setFoundGroup(null);setFound(null);setMid("");
   };
 
   // ── Success screen after marking delivered — offers immediate feedback request ──
@@ -2811,8 +2907,8 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
   );
 
   return(
-    <div style={{maxWidth:500,margin:"0 auto"}}>
-      {!found&&(
+    <div style={{maxWidth:560,margin:"0 auto"}}>
+      {!foundGroup&&(
         <div className="card">
           <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>Scan to Deliver & Collect Payment</div>
           <QRScanner onResult={onScan} onError={()=>toast2("Camera error","err")}/>
@@ -2827,11 +2923,49 @@ function Deliver({orders,updOrder,updOrderH,user,toast2}){
           </div>
         </div>
       )}
+      {foundGroup&&!found&&(
+        <div className="card">
+          <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
+            <div style={{fontWeight:700,fontSize:16}}>Order Found{foundGroup.length>1?` — ${foundGroup.length} items`:""}</div>
+            <button onClick={()=>{setFoundGroup(null);setMid("");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
+          </div>
+          <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:14}}>
+            <div style={{fontSize:20,fontWeight:900,color:"#cc0000",marginBottom:2}}>{displayOrderNum(foundGroup[0],orders)}</div>
+            <div style={{fontWeight:700,fontSize:14}}>{foundGroup[0].customer} · {foundGroup[0].mobile}</div>
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
+            {foundGroup.map(o=>(
+              <div key={o.id} style={{border:"1px solid #eeebe6",borderRadius:10,padding:12,display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                <div>
+                  <div style={{fontSize:13,fontWeight:700}}>{displayOrderNum(o,orders)} · <b className="size-strong-sm">{o.size}</b></div>
+                  <div style={{fontSize:11.5,color:"#999"}}>{o.product} · {o.wood} · Qty {o.qty} · Pending {fmtM(o.pending)}</div>
+                </div>
+                {o.status===S.DELI
+                  ?<StatusBadge s={o.status}/>
+                  :isFactoryOrder(o)
+                  ?<span style={{fontSize:11,color:"#0f6e56",fontWeight:600}}>🏭 Use Factory View</span>
+                  :o.status===S.PEND
+                  ?<span style={{fontSize:11,color:"#cc0000",fontWeight:600}}>⏳ Not accepted yet</span>
+                  :<button className="btn btn-red" style={{padding:"6px 12px",fontSize:12}} onClick={()=>openItem(o)}><i className="ti ti-truck-delivery"/>Deliver</button>}
+              </div>
+            ))}
+          </div>
+          {foundGroup.filter(deliverableFull).length>1&&(
+            <div style={{background:"#fafaf8",borderRadius:10,padding:12,marginBottom:8}}>
+              <div style={{fontSize:11.5,fontWeight:600,color:"#777",marginBottom:7}}>Deliver all remaining items · Full payment · Same method</div>
+              <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:8}}>
+                {PAY_M.map(m=>(<button key={m} className="btn" onClick={()=>setPm(m)} style={{background:pm===m?"#1a1a1a":"#fff",color:pm===m?"#fff":"#555",border:`1.5px solid ${pm===m?"#1a1a1a":"#ddd"}`,fontSize:12}}>{m}</button>))}
+              </div>
+              <button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:14}} onClick={markDelAllFull}><i className="ti ti-checks"/>Deliver All {foundGroup.filter(deliverableFull).length} Items (Full Payment)</button>
+            </div>
+          )}
+        </div>
+      )}
       {found&&(
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",marginBottom:12}}>
             <div style={{fontWeight:700,fontSize:16}}>Payment & Delivery</div>
-            <button onClick={()=>{setFound(null);setMid("");setLoc("At Office");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
+            <button onClick={()=>{setFound(null);setLoc("At Office");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
           </div>
           <div style={{background:"#fafaf8",borderRadius:12,padding:13,marginBottom:13}}>
             <div style={{fontSize:20,fontWeight:900,color:"#cc0000",marginBottom:2}}>
