@@ -36,6 +36,7 @@ if("serviceWorker" in navigator){
 <script src="https://cdn.jsdelivr.net/npm/jsqr@1.4.0/dist/jsQR.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'Segoe UI',sans-serif;background:#f5f5f3;}
@@ -70,19 +71,27 @@ const FIREBASE_CONFIG={
   appId:"1:448585552357:web:d673cce35f7c35e4fc5f0c"
 };
 const FIREBASE_READY=!Object.values(FIREBASE_CONFIG).some(v=>v.includes("PASTE_YOUR"));
-if(FIREBASE_READY){firebase.initializeApp(FIREBASE_CONFIG);window.db=firebase.firestore();}
-else window.db=null;
+if(FIREBASE_READY){
+  firebase.initializeApp(FIREBASE_CONFIG);
+  window.db=firebase.firestore();
+  window.auth=firebase.auth();
+  // Keep staff signed in on this device until they explicitly sign out
+  window.auth.setPersistence(firebase.auth.Auth.Persistence.LOCAL).catch(()=>{});
+}
+else{window.db=null;window.auth=null;}
+// Staff type a plain username (e.g. "admin"); Firebase Auth needs an email,
+// so we convert it consistently behind the scenes — no password ever lives in this file.
+const USERNAME_DOMAIN="hanumansawmill.local";
+const usernameToEmail=u=>String(u||"").trim().toLowerCase().replace(/\s+/g,"")+"@"+USERNAME_DOMAIN;
 </script>
 
 <script type="text/babel">
 const {useState,useRef,useEffect,useCallback,useMemo}=React;
 
-const USERS=[
-  {id:1,name:"Admin User",username:"admin",password:"meet2007",role:"Admin"},
-  {id:2,name:"Ravi Kumar",username:"office",password:"jignesh2026",role:"Office Staff"},
-  {id:3,name:"Suresh Factory",username:"factory",password:"arvind2026",role:"Factory Staff"},
-  {id:4,name:"Accounts User",username:"accounts",password:"acc123",role:"Accountant"},
-];
+// Staff accounts now live in Firebase Authentication + the Firestore "users"
+// collection (see the login screen and App's auth listener below) instead of
+// being hardcoded here in plain text.
+const ROLES=["Admin","Office Staff","Factory Staff","Accountant"];
 const WOODS=["Khair","Sisam","Pine","Teak","Saghwan","Deodar"];
 const PRODUCTS=["Umbra Patti","Door Frame","Window Frame","Plank","Batten","Rafter","Purlin","Custom"];
 const PAY_M=["Cash","UPI","Bank Transfer"];
@@ -494,8 +503,27 @@ function QRScanner({onResult,onError}){
 
 // ── LOGIN ──
 function Login({onLogin}){
-  const [u,setU]=useState(""),[p,setP]=useState(""),[err,setErr]=useState("");
-  const go=e=>{e.preventDefault();const f=USERS.find(x=>x.username===u&&x.password===p);f?onLogin(f):setErr("Invalid username or password");};
+  const [u,setU]=useState(""),[p,setP]=useState(""),[err,setErr]=useState(""),[busy,setBusy]=useState(false);
+  const go=async e=>{
+    e.preventDefault();
+    setErr("");
+    if(!window.auth){setErr("Cloud login isn't set up yet — check your connection.");return;}
+    setBusy(true);
+    try{
+      const cred=await window.auth.signInWithEmailAndPassword(usernameToEmail(u),p);
+      const doc=await window.db.collection("users").doc(cred.user.uid).get();
+      if(!doc.exists){
+        setErr("Account has no profile set up. Contact your Admin.");
+        await window.auth.signOut();
+        setBusy(false);
+        return;
+      }
+      onLogin({uid:cred.user.uid,...doc.data()});
+    }catch(e){
+      setErr("Invalid username or password");
+      setBusy(false);
+    }
+  };
   return(
     <div style={{minHeight:"100vh",background:"#1a1a1a",display:"flex",alignItems:"center",justifyContent:"center",padding:16}}>
       <div style={{background:"#fff",borderRadius:20,padding:"40px 32px",width:"100%",maxWidth:360,textAlign:"center"}}>
@@ -503,11 +531,11 @@ function Login({onLogin}){
         <div style={{fontSize:11,color:"#aaa",letterSpacing:2,marginTop:4,marginBottom:28}}>HANUMAN SAW MILL</div>
         <form onSubmit={go} style={{display:"flex",flexDirection:"column",gap:12,textAlign:"left"}}>
           <div><label style={{fontSize:12,fontWeight:600,color:"#666",display:"block",marginBottom:4}}>Username</label>
-            <input className="inp" value={u} onChange={e=>setU(e.target.value)} placeholder="Enter username" autoFocus/></div>
+            <input className="inp" value={u} onChange={e=>setU(e.target.value)} placeholder="Enter username" autoFocus disabled={busy}/></div>
           <div><label style={{fontSize:12,fontWeight:600,color:"#666",display:"block",marginBottom:4}}>Password</label>
-            <input type="password" className="inp" value={p} onChange={e=>setP(e.target.value)} placeholder="Enter password"/></div>
+            <input type="password" className="inp" value={p} onChange={e=>setP(e.target.value)} placeholder="Enter password" disabled={busy}/></div>
           {err&&<div style={{color:"#cc0000",fontSize:12,fontWeight:500}}>{err}</div>}
-          <button type="submit" className="btn btn-red" style={{justifyContent:"center",marginTop:4}}>Sign In</button>
+          <button type="submit" className="btn btn-red" style={{justifyContent:"center",marginTop:4,opacity:busy?.6:1}} disabled={busy}>{busy?"Signing in...":"Sign In"}</button>
         </form>
       </div>
     </div>
@@ -517,12 +545,29 @@ function Login({onLogin}){
 // ── SHELL ──
 function App(){
   const [user,setUser]=useState(null);
+  const [authChecked,setAuthChecked]=useState(!window.auth); // if no auth configured, skip straight to login
   const [page,setPage]=useState("dashboard");
   const [orders,setOrders]=useState([]);
   const [toast,setToast]=useState(null);
   const [menuOpen,setMenuOpen]=useState(false);
   const [loading,setLoading]=useState(false);
   const [dbMode]=useState(!!window.db);
+
+  // Restore the signed-in staff member automatically (persisted login) —
+  // this is what lets someone stay logged in after closing/reopening the app.
+  useEffect(()=>{
+    if(!window.auth){return;}
+    const unsub=window.auth.onAuthStateChanged(async fbUser=>{
+      if(!fbUser){setUser(null);setAuthChecked(true);return;}
+      try{
+        const doc=await window.db.collection("users").doc(fbUser.uid).get();
+        if(doc.exists) setUser({uid:fbUser.uid,...doc.data()});
+        else{await window.auth.signOut();setUser(null);}
+      }catch(e){setUser(null);}
+      setAuthChecked(true);
+    });
+    return()=>unsub();
+  },[]);
 
   useEffect(()=>{
     if(!window.db||!user)return;
@@ -633,6 +678,11 @@ function App(){
     else{setOrders(p=>p.filter(o=>o.id!==id));toast2("Order permanently deleted");}
   };
 
+  if(!authChecked)return(
+    <div style={{minHeight:"100vh",background:"#1a1a1a",display:"flex",alignItems:"center",justifyContent:"center"}}>
+      <div style={{color:"#666",fontSize:13}}>Checking session...</div>
+    </div>
+  );
   if(!user)return <Login onLogin={u=>{setUser(u);setPage("dashboard");}}/>;
 
   const activeOrders=orders.filter(o=>!isTrashed(o));
@@ -681,7 +731,7 @@ function App(){
             <div style={{width:30,height:30,borderRadius:"50%",background:"#cc0000",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff"}}>{user.name[0]}</div>
             <div><div style={{fontSize:11,fontWeight:600,color:"#ddd"}}>{user.name}</div><div style={{fontSize:10,color:"#555"}}>{user.role}</div></div>
           </div>
-          <button className="nav-btn" style={{color:"#666"}} onClick={()=>setUser(null)}><i className="ti ti-logout" style={{fontSize:16}}/>Sign Out</button>
+          <button className="nav-btn" style={{color:"#666"}} onClick={()=>{if(window.auth)window.auth.signOut();else setUser(null);}}><i className="ti ti-logout" style={{fontSize:16}}/>Sign Out</button>
         </div>
       </aside>
 
