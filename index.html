@@ -924,6 +924,15 @@ function Dashboard({orders,goto,user}){
           </div>
         </div>
       )}
+
+      {canViewFinancial&&(
+        <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#1d9e75,#0f6e56)",border:"none"}}>
+          <div style={{fontSize:11,color:"#d8f5ea",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:.5}}>Today's Order Value (Sales)</div>
+          <div style={{fontSize:34,fontWeight:900,color:"#fff"}}>{fmtM(sales)}</div>
+          <div style={{fontSize:12,color:"#d8f5ea",marginTop:4}}>{todayOrders.length} order{todayOrders.length===1?"":"s"} created · {totalQty} item{totalQty===1?"":"s"} sold · total worth of every order placed today</div>
+          <div style={{fontSize:10.5,color:"rgba(255,255,255,.75)",marginTop:3}}>Includes outstanding balances ({fmtM(todayPendingAmt)}) and advance received ({fmtM(todayAdvOrders.reduce((a,o)=>a+Number(o.advance||0),0))}) — full order value regardless of payment status</div>
+        </div>
+      )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
         {stats.filter(s=>canViewFinancial||!["Total Sales Amount","Cash Collected","UPI Collected","Other Payments","Average Order Value","Total Orders Today"].includes(s.l)).map(s=>(
           <div key={s.l} className="card" style={{padding:"14px 16px"}}>
@@ -2445,7 +2454,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
   const [delTarget,setDelTarget]=useState(null);
   const [dispatchTarget,setDispatchTarget]=useState(null);
   const [showNewOrder,setShowNewOrder]=useState(false);
-  const [showScanDispatch,setShowScanDispatch]=useState(false);
+  const [scanMode,setScanMode]=useState(null); // 'dispatch' | 'deliver' | null
   const [scanResult,setScanResult]=useState(null); // the matched order after scan
   const [qrSelectMode,setQrSelectMode]=useState(false);
   const [selectedQRIds,setSelectedQRIds]=useState(new Set());
@@ -2473,7 +2482,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
     updOrderH(o.id,patch,h);
     toast2("Order marked Delivered from Factory");
     setFactoryDeliveredOrder({...o,...patch});
-    setSel(null);setScanResult(null);setShowScanDispatch(false);
+    setSel(null);setScanResult(null);setScanMode(null);
   };
 
   // Scanning the single order QR now loads every size/sub-item belonging to that order.
@@ -2642,12 +2651,12 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
       updOrderH(o.id,{status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name},h);
     });
     toast2(`${items.length} item${items.length===1?"":"s"} marked In Transit!`);
-    setScanResult(null);setShowScanDispatch(false);
+    setScanResult(null);setScanMode(null);
   };
   const markFactoryDeliveredAll=()=>{
     const items=scanResult.filter(o=>o.status!==S.DELI);
     items.forEach(markFactoryDelivered);
-    setScanResult(null);setShowScanDispatch(false);
+    setScanResult(null);setScanMode(null);
   };
 
   return(
@@ -2663,7 +2672,10 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
             <i className="ti ti-checkbox"/>
             {qrSelectMode?"Cancel QR Select":"Select QR to Print"}
           </button>
-          <button className="btn" style={{background:"#1d9e75",color:"#fff"}} onClick={()=>{setShowScanDispatch(p=>!p);setScanResult(null);setScanMid("");}}>
+          <button className="btn" style={{background:"#6a1bb5",color:"#fff"}} onClick={()=>{setScanMode(m=>m==="dispatch"?null:"dispatch");setScanResult(null);setScanMid("");}}>
+            <i className="ti ti-qrcode"/>Scan & Dispatch
+          </button>
+          <button className="btn" style={{background:"#1d9e75",color:"#fff"}} onClick={()=>{setScanMode(m=>m==="deliver"?null:"deliver");setScanResult(null);setScanMid("");}}>
             <i className="ti ti-qrcode"/>Scan & Deliver
           </button>
           <button className="btn btn-red" onClick={()=>setShowNewOrder(true)}>
@@ -2689,20 +2701,20 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
       )}
 
       {/* ── Inline Factory QR scan panel ── */}
-      {showScanDispatch&&(
-        <div className="card" style={{marginBottom:18,border:"2px solid #1d9e75"}}>
+      {scanMode&&(
+        <div className="card" style={{marginBottom:18,border:`2px solid ${scanMode==="dispatch"?"#6a1bb5":"#1d9e75"}`}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
             <div>
-              <div style={{fontWeight:700,fontSize:15,color:"#1d9e75"}}><i className="ti ti-qrcode" style={{marginRight:6}}/>Factory Scan & Deliver</div>
-              <div style={{fontSize:11,color:"#888",marginTop:2}}>For customers picking up directly from the factory</div>
+              <div style={{fontWeight:700,fontSize:15,color:scanMode==="dispatch"?"#6a1bb5":"#1d9e75"}}><i className="ti ti-qrcode" style={{marginRight:6}}/>{scanMode==="dispatch"?"Factory Scan & Dispatch":"Factory Scan & Deliver"}</div>
+              <div style={{fontSize:11,color:"#888",marginTop:2}}>{scanMode==="dispatch"?"Mark an order as dispatched (In Transit) from the factory":"For customers picking up directly from the factory"}</div>
             </div>
-            <button onClick={()=>{setShowScanDispatch(false);setScanResult(null);setScanMid("");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
+            <button onClick={()=>{setScanMode(null);setScanResult(null);setScanMid("");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
           </div>
 
           {!scanResult?(
             <>
               <div style={{fontSize:12.5,color:"#777",marginBottom:12}}>
-                Scan the customer's order QR code. You can mark it delivered directly from here — no need to route through the Office.
+                {scanMode==="dispatch"?"Scan the order's QR code to mark it dispatched (In Transit).":"Scan the customer's order QR code. You can mark it delivered directly from here — no need to route through the Office."}
               </div>
               <QRScanner onResult={onScanDispatch} onError={()=>toast2("Camera error","err")}/>
               <div style={{display:"flex",alignItems:"center",gap:10,margin:"14px 0"}}>
@@ -2735,9 +2747,19 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
                       </div>
                       <div style={{fontSize:12,color:"#777",marginBottom:8}}>{o.product} · {o.wood} · Qty {o.qty}</div>
                       <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-                        {o.status===S.PROD&&<button className="btn" style={{padding:"6px 12px",fontSize:12,background:"#6a1bb5",color:"#fff"}} onClick={()=>doScanDispatchItem(o)}><i className="ti ti-truck"/>Mark In Transit</button>}
-                        {o.status!==S.DELI&&<button className="btn btn-green" style={{padding:"6px 12px",fontSize:12}} onClick={()=>markFactoryDelivered(o)}><i className="ti ti-package-export"/>Deliver{o.status===S.PEND?" (Auto-Accept)":""}</button>}
-                        {o.status===S.DELI&&<span style={{fontSize:11.5,color:"#0f6e56",fontWeight:700}}><i className="ti ti-circle-check" style={{marginRight:4}}/>Already Delivered</span>}
+                        {scanMode==="dispatch"?(
+                          <>
+                            {o.status===S.PROD&&<button className="btn" style={{padding:"6px 12px",fontSize:12,background:"#6a1bb5",color:"#fff"}} onClick={()=>doScanDispatchItem(o)}><i className="ti ti-truck"/>Mark In Transit</button>}
+                            {o.status===S.PEND&&<span style={{fontSize:11.5,color:"#cc0000",fontWeight:700}}>Not yet accepted — accept it first</span>}
+                            {o.status===S.TRANSIT&&<span style={{fontSize:11.5,color:"#6a1bb5",fontWeight:700}}><i className="ti ti-truck" style={{marginRight:4}}/>Already In Transit</span>}
+                            {o.status===S.DELI&&<span style={{fontSize:11.5,color:"#0f6e56",fontWeight:700}}><i className="ti ti-circle-check" style={{marginRight:4}}/>Already Delivered</span>}
+                          </>
+                        ):(
+                          <>
+                            {o.status!==S.DELI&&<button className="btn btn-green" style={{padding:"6px 12px",fontSize:12}} onClick={()=>markFactoryDelivered(o)}><i className="ti ti-package-export"/>Deliver{o.status===S.PEND?" (Auto-Accept)":""}</button>}
+                            {o.status===S.DELI&&<span style={{fontSize:11.5,color:"#0f6e56",fontWeight:700}}><i className="ti ti-circle-check" style={{marginRight:4}}/>Already Delivered</span>}
+                          </>
+                        )}
                       </div>
                     </div>
                   ))}
@@ -2748,10 +2770,10 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
                 <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={()=>{setScanResult(null);setScanMid("");}}>
                   <i className="ti ti-arrow-back-up"/>Scan Again
                 </button>
-                {scanResult.filter(o=>o.status===S.PROD).length>1&&<button className="btn" style={{flex:1,justifyContent:"center",background:"#6a1bb5",color:"#fff",fontSize:14}} onClick={doScanDispatchAll}>
+                {scanMode==="dispatch"&&scanResult.filter(o=>o.status===S.PROD).length>1&&<button className="btn" style={{flex:1,justifyContent:"center",background:"#6a1bb5",color:"#fff",fontSize:14}} onClick={doScanDispatchAll}>
                   <i className="ti ti-truck"/>Mark All In Transit
                 </button>}
-                {scanResult.filter(o=>o.status!==S.DELI).length>1&&<button className="btn btn-green" style={{flex:1,justifyContent:"center",fontSize:14,fontWeight:700}} onClick={markFactoryDeliveredAll}>
+                {scanMode==="deliver"&&scanResult.filter(o=>o.status!==S.DELI).length>1&&<button className="btn btn-green" style={{flex:1,justifyContent:"center",fontSize:14,fontWeight:700}} onClick={markFactoryDeliveredAll}>
                   <i className="ti ti-package-export"/>Deliver All
                 </button>}
               </div>
@@ -3735,7 +3757,9 @@ function Reports({orders}){
   // ── DAILY TAB ──
   const dayDeli=deli.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===dateSel;});
   const dayPlaced=orders.filter(o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===dateSel;}); // all orders placed on this day
-  const dayRevenue=dayDeli.reduce((a,o)=>a+orderTotalOf(o),0);
+  // Daily Sales Revenue = total worth of every order PLACED this day (product + design, regardless of delivery/payment status),
+  // so it already includes outstanding balances and advance received — not just money actually collected.
+  const dayRevenue=dayPlaced.reduce((a,o)=>a+orderTotalOf(o),0);
   const cashOrders=dayDeli.filter(o=>o.payMethod==="Cash");
   const upiOrders=dayDeli.filter(o=>o.payMethod==="UPI");
   const otherOrders=dayDeli.filter(o=>o.payMethod&&o.payMethod!=="Cash"&&o.payMethod!=="UPI");
@@ -3780,33 +3804,39 @@ function Reports({orders}){
   });
 
   const monthMap={};
+  const getMonthEntry=key=>{
+    if(!monthMap[key]) monthMap[key]={label:"",orders:[],placedCount:0,revenue:0,cashCount:0,cashTotal:0,upiCount:0,upiTotal:0,office:0,production:0,advCash:0,advUPI:0,outstanding:0};
+    return monthMap[key];
+  };
+  // Seed every month from orders PLACED that month — this is the source of "Monthly Revenue": the
+  // total worth of every order created that month (product + design), which already includes
+  // outstanding balances and advance received, regardless of whether it's been delivered/paid yet.
+  // This also ensures a month shows up here even before any of its orders have been delivered.
+  orders.forEach(o=>{
+    const p=parseLocaleDate(o.created);
+    if(!p) return;
+    const m=getMonthEntry(p.monthKey);
+    m.label=p.monthLabel;
+    m.placedCount++;
+    m.revenue+=orderTotalOf(o);
+    if(Number(o.pending)>0) m.outstanding+=Number(o.pending)||0;
+    if(Number(o.advance)>0){
+      if(o.advPayMethod==="UPI") m.advUPI+=Number(o.advance)||0;
+      else m.advCash+=Number(o.advance)||0; // default/Cash
+    }
+  });
+  // Overlay delivery-specific stats (final payment method breakdown, delivery location counts),
+  // grouped by the month the order was actually delivered in.
   deli.forEach(o=>{
     const p=parseLocaleDate(o.deliveredAt);
     if(!p) return;
-    if(!monthMap[p.monthKey]) monthMap[p.monthKey]={label:p.monthLabel,orders:[],revenue:0,cashCount:0,cashTotal:0,upiCount:0,upiTotal:0,office:0,production:0,advCash:0,advUPI:0,outstanding:0};
-    const m=monthMap[p.monthKey];
-    m.orders.push(o);m.revenue+=orderTotalOf(o);
+    const m=getMonthEntry(p.monthKey);
+    m.label=m.label||p.monthLabel;
+    m.orders.push(o);
     if(o.payMethod==="Cash"){m.cashCount++;m.cashTotal+=orderTotalOf(o);}
     if(o.payMethod==="UPI"){m.upiCount++;m.upiTotal+=orderTotalOf(o);}
     if(o.deliveredLocation==="At Office")m.office++;
     if(o.deliveredLocation==="At Production")m.production++;
-  });
-  // Add advance payments into the month of creation
-  orders.forEach(o=>{
-    if(!o.advance||!o.created) return;
-    const p=parseLocaleDate(o.created);
-    if(!p) return;
-    if(!monthMap[p.monthKey]) return; // only track advances for months that have deliveries
-    if(o.advPayMethod==="Cash"||!o.advPayMethod) monthMap[p.monthKey].advCash+=Number(o.advance)||0;
-    if(o.advPayMethod==="UPI") monthMap[p.monthKey].advUPI+=Number(o.advance)||0;
-  });
-  // Outstanding amount for each month (orders placed that month that still have a pending balance)
-  orders.forEach(o=>{
-    if(!(o.pending>0)||!o.created) return;
-    const p=parseLocaleDate(o.created);
-    if(!p) return;
-    if(!monthMap[p.monthKey]) return; // only track outstanding for months that have deliveries
-    monthMap[p.monthKey].outstanding+=Number(o.pending)||0;
   });
   const months=Object.entries(monthMap).sort((a,b)=>b[0].localeCompare(a[0]));
 
@@ -3847,11 +3877,11 @@ function Reports({orders}){
             </div>
           </div>
 
-          {/* Daily Sales Revenue — prominent */}
+          {/* Daily Sales Revenue — prominent — total worth of orders placed this day, incl. outstanding & advance */}
           <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#1d9e75,#0f6e56)",border:"none"}}>
-            <div style={{fontSize:11,color:"#d8f5ea",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:.5}}>Daily Sales Revenue</div>
+            <div style={{fontSize:11,color:"#d8f5ea",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:.5}}>Daily Sales Revenue (Order Value)</div>
             <div style={{fontSize:34,fontWeight:900,color:"#fff"}}>{fmtM(dayRevenue)}</div>
-            <div style={{fontSize:12,color:"#d8f5ea",marginTop:4}}>{dayDeli.length} order{dayDeli.length===1?"":"s"} delivered · {dayPlaced.length} placed</div>
+            <div style={{fontSize:12,color:"#d8f5ea",marginTop:4}}>{dayPlaced.length} order{dayPlaced.length===1?"":"s"} placed · {dayDeli.length} delivered · total worth incl. outstanding & advance</div>
           </div>
 
           {/* Outstanding Amount for this day */}
@@ -3970,18 +4000,20 @@ function Reports({orders}){
             </div>}
           </div>
 
-          {/* Monthly Revenue breakdown */}
-          <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Monthly Revenue (Delivered Orders)</div>
-          {months.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No delivered orders yet</div>}
+          {/* Monthly Revenue breakdown — total worth of orders PLACED each month, incl. outstanding & advance */}
+          <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Monthly Revenue (Orders Placed — Total Order Value)</div>
+          {months.length===0&&<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No orders yet</div>}
           <div style={{display:"flex",flexDirection:"column",gap:14}}>
             {months.map(([key,m])=>(
               <div key={key} className="card">
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14,flexWrap:"wrap",gap:8}}>
+                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:2,flexWrap:"wrap",gap:8}}>
                   <div style={{fontWeight:700,fontSize:16}}>{m.label}</div>
                   <div style={{fontSize:22,fontWeight:900,color:"#1d9e75"}}>{fmtM(m.revenue)}</div>
                 </div>
+                <div style={{fontSize:10.5,color:"#bbb",marginBottom:12}}>{m.placedCount} order{m.placedCount===1?"":"s"} placed · total worth incl. outstanding & advance received</div>
                 <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(120px,1fr))",gap:10,marginBottom:12}}>
                   {[
+                    ["Orders Placed",m.placedCount,"#cc0000","ti-clipboard-list"],
                     ["Orders Delivered",m.orders.length,"#185fa5","ti-circle-check"],
                     ["Cash (Final)",`${m.cashCount} · ${fmtM(m.cashTotal)}`,"#1d9e75","ti-cash"],
                     ["UPI (Final)",`${m.upiCount} · ${fmtM(m.upiTotal)}`,"#185fa5","ti-qrcode"],
