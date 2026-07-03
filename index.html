@@ -2470,7 +2470,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
     let extraPatch={};
     if(!isFactoryOrder(o)&&o.status===S.PEND){extraPatch={acceptedAt:now2(),acceptedBy:user.name};}
     const h=makeHistoryEntry("Delivered at Factory","Factory");
-    const patch={status:S.DELI,pending:0,payMethod:"Direct Factory Pickup",payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:"At Production",...extraPatch};
+    const patch={status:S.DELI,pending:0,payMethod:"Cash",deliveryChannel:"Direct Factory Pickup",payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:"At Production",...extraPatch};
     updOrderH(o.id,patch,h);
     toast2("Order marked Delivered from Factory");
     setFactoryDeliveredOrder({...o,...patch});
