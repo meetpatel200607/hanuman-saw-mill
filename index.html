@@ -834,8 +834,9 @@ function Dashboard({orders,goto,user}){
   const cashCollected=todayDelivered.filter(o=>o.payMethod==="Cash").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash").reduce((a,o)=>a+Number(o.advance||0),0);
   const upiCollected=todayDelivered.filter(o=>o.payMethod==="UPI").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod==="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
   const otherCollected=todayDelivered.filter(o=>o.payMethod&&o.payMethod!=="Cash"&&o.payMethod!=="UPI").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod&&o.advPayMethod!=="Cash"&&o.advPayMethod!=="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
-  // Today's Revenue = Cash + UPI + Other Payments. Each payment (a delivery payment or an advance) is counted exactly once, in whichever bucket matches its payment method.
-  const todayRevenue=cashCollected+upiCollected+otherCollected;
+  // Today's Revenue = total worth of every order placed today (product + design), i.e. the full order value —
+  // this already includes outstanding balances and advance received, not just money actually collected.
+  const todayRevenue=sales;
   const pendingOrders=orders.filter(o=>o.status!==S.DELI).length;
   const completedToday=todayDelivered.length;
   const prod=orders.filter(o=>o.status===S.PROD).length;
@@ -862,7 +863,6 @@ function Dashboard({orders,goto,user}){
   const stats=[
     {l:"Total Orders (All Time)",v:orders.length,icon:"ti-clipboard-list",c:"#cc0000"},
     {l:"Total Orders Today",v:todayOrders.length,icon:"ti-calendar-plus",c:"#854f0b"},
-    {l:"Total Sales Amount",v:fmtM(sales),icon:"ti-currency-rupee",c:"#3b6d11"},
     {l:"Cash Collected",v:fmtM(cashCollected),icon:"ti-cash",c:"#1d9e75"},
     {l:"UPI Collected",v:fmtM(upiCollected),icon:"ti-qrcode",c:"#185fa5"},
     {l:"Other Payments",v:fmtM(otherCollected),icon:"ti-building-bank",c:"#854f0b"},
@@ -879,23 +879,15 @@ function Dashboard({orders,goto,user}){
         <div className="card" style={{marginBottom:16,background:"#1a1a1a",border:"none",color:"#fff"}}>
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap",marginBottom:16}}>
             <div>
-              <div style={{fontSize:11,color:"#ffb3b3",fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>Today's Revenue</div>
+              <div style={{fontSize:11,color:"#ffb3b3",fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>Today's Revenue (Total Order Value)</div>
               <div style={{fontSize:32,fontWeight:900,marginTop:4,color:"#fff"}}>{fmtM(todayRevenue)}</div>
-              <div style={{fontSize:10.5,color:"#777",marginTop:3}}>Today's Revenue = Cash + UPI + Other Payments</div>
+              <div style={{fontSize:10.5,color:"#777",marginTop:3}}>Total worth of every order placed today — includes outstanding balances and advance received</div>
               <div style={{fontSize:12,color:"#bbb",marginTop:4}}>{todayOrders.length} orders · {totalQty} items</div>
             </div>
             <button className="btn btn-red" onClick={()=>goto("reports")}><i className="ti ti-report"/>Full Reports</button>
           </div>
 
-          {/* Total Order Value — full worth of every order placed today, incl. outstanding & advance */}
-          <div style={{background:"linear-gradient(135deg,#1d9e75,#0f6e56)",borderRadius:10,padding:"12px 14px",marginBottom:12}}>
-            <div style={{fontSize:11,color:"#d8f5ea",fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>Today's Order Value (Sales)</div>
-            <div style={{fontSize:26,fontWeight:900,color:"#fff",marginTop:2}}>{fmtM(sales)}</div>
-            <div style={{fontSize:11,color:"#d8f5ea",marginTop:3}}>{todayOrders.length} order{todayOrders.length===1?"":"s"} created · {totalQty} item{totalQty===1?"":"s"} sold · total worth of every order placed today</div>
-            <div style={{fontSize:10,color:"rgba(255,255,255,.75)",marginTop:2}}>Includes outstanding balances ({fmtM(todayPendingAmt)}) and advance received ({fmtM(todayAdvOrders.reduce((a,o)=>a+Number(o.advance||0),0))}) — full order value regardless of payment status</div>
-          </div>
-
-          {/* Payment breakdown row */}
+          {/* Payment breakdown row — actual money collected today, part of Today's Revenue above */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:1,background:"#333",borderRadius:10,overflow:"hidden",marginBottom:12}}>
             {[["💵 Cash",cashCollected,"#e8f5e9","#0f6e56"],["📱 UPI",upiCollected,"#e3f2fd","#185fa5"],["🏦 Other Payments",otherCollected,"#fafafa","#555"]].map(([l,v,bg,c])=>(
               <div key={l} style={{background:"#252525",padding:"10px 12px",textAlign:"center"}}>
@@ -927,14 +919,14 @@ function Dashboard({orders,goto,user}){
             <div style={{background:"#252525",borderRadius:10,padding:"10px 12px"}}>
               <div style={{fontSize:10.5,color:"#888",marginBottom:2}}>Today's Pending Due</div>
               <div style={{fontSize:16,fontWeight:700,color:todayPendingAmt>0?"#ff6b6b":"#aaa"}}>{fmtM(todayPendingAmt)}</div>
-              <div style={{fontSize:10.5,color:"#666",marginTop:2}}>Informational only — not part of Revenue · Total outstanding: {fmtM(totalPendingAmt)}</div>
+              <div style={{fontSize:10.5,color:"#666",marginTop:2}}>Already included in Revenue above · Total outstanding: {fmtM(totalPendingAmt)}</div>
             </div>
           </div>
         </div>
       )}
 
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
-        {stats.filter(s=>canViewFinancial||!["Total Sales Amount","Cash Collected","UPI Collected","Other Payments","Average Order Value","Total Orders Today"].includes(s.l)).map(s=>(
+        {stats.filter(s=>canViewFinancial||!["Cash Collected","UPI Collected","Other Payments","Average Order Value","Total Orders Today"].includes(s.l)).map(s=>(
           <div key={s.l} className="card" style={{padding:"14px 16px"}}>
             <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:8}}>
               <div style={{width:32,height:32,borderRadius:9,background:s.c+"18",display:"flex",alignItems:"center",justifyContent:"center"}}><i className={`ti ${s.icon}`} style={{color:s.c,fontSize:16}}/></div>
