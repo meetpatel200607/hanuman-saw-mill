@@ -887,6 +887,14 @@ function Dashboard({orders,goto,user}){
             <button className="btn btn-red" onClick={()=>goto("reports")}><i className="ti ti-report"/>Full Reports</button>
           </div>
 
+          {/* Total Order Value — full worth of every order placed today, incl. outstanding & advance */}
+          <div style={{background:"linear-gradient(135deg,#1d9e75,#0f6e56)",borderRadius:10,padding:"12px 14px",marginBottom:12}}>
+            <div style={{fontSize:11,color:"#d8f5ea",fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>Today's Order Value (Sales)</div>
+            <div style={{fontSize:26,fontWeight:900,color:"#fff",marginTop:2}}>{fmtM(sales)}</div>
+            <div style={{fontSize:11,color:"#d8f5ea",marginTop:3}}>{todayOrders.length} order{todayOrders.length===1?"":"s"} created · {totalQty} item{totalQty===1?"":"s"} sold · total worth of every order placed today</div>
+            <div style={{fontSize:10,color:"rgba(255,255,255,.75)",marginTop:2}}>Includes outstanding balances ({fmtM(todayPendingAmt)}) and advance received ({fmtM(todayAdvOrders.reduce((a,o)=>a+Number(o.advance||0),0))}) — full order value regardless of payment status</div>
+          </div>
+
           {/* Payment breakdown row */}
           <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:1,background:"#333",borderRadius:10,overflow:"hidden",marginBottom:12}}>
             {[["💵 Cash",cashCollected,"#e8f5e9","#0f6e56"],["📱 UPI",upiCollected,"#e3f2fd","#185fa5"],["🏦 Other Payments",otherCollected,"#fafafa","#555"]].map(([l,v,bg,c])=>(
@@ -925,14 +933,6 @@ function Dashboard({orders,goto,user}){
         </div>
       )}
 
-      {canViewFinancial&&(
-        <div className="card" style={{marginBottom:16,background:"linear-gradient(135deg,#1d9e75,#0f6e56)",border:"none"}}>
-          <div style={{fontSize:11,color:"#d8f5ea",marginBottom:4,fontWeight:600,textTransform:"uppercase",letterSpacing:.5}}>Today's Order Value (Sales)</div>
-          <div style={{fontSize:34,fontWeight:900,color:"#fff"}}>{fmtM(sales)}</div>
-          <div style={{fontSize:12,color:"#d8f5ea",marginTop:4}}>{todayOrders.length} order{todayOrders.length===1?"":"s"} created · {totalQty} item{totalQty===1?"":"s"} sold · total worth of every order placed today</div>
-          <div style={{fontSize:10.5,color:"rgba(255,255,255,.75)",marginTop:3}}>Includes outstanding balances ({fmtM(todayPendingAmt)}) and advance received ({fmtM(todayAdvOrders.reduce((a,o)=>a+Number(o.advance||0),0))}) — full order value regardless of payment status</div>
-        </div>
-      )}
       <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
         {stats.filter(s=>canViewFinancial||!["Total Sales Amount","Cash Collected","UPI Collected","Other Payments","Average Order Value","Total Orders Today"].includes(s.l)).map(s=>(
           <div key={s.l} className="card" style={{padding:"14px 16px"}}>
