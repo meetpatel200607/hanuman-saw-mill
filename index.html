@@ -158,6 +158,21 @@ const productTotalOf=o=>{
 const orderTotalOf=o=>productTotalOf(o)+designCostOf(o);
 const totalFormulaText=o=>`${fmtM(productTotalOf(o))}${designCostOf(o)>0?` + ${fmtM(designCostOf(o))}`:""} = ${fmtM(orderTotalOf(o))}`;
 const isTrashed=o=>!!(o&&o.deleted);
+// ── Wholesale helpers ── Wholesale orders live in the exact same "orders" collection as retail orders
+// (same status pipeline, same production/delivery flow) but are tagged orderType:"Wholesale" and linked
+// to a wholesaleCustomerId, so they stay filterable/separable while still counting in overall revenue & reports.
+const orderTypeOf=o=>(o&&o.orderType)?o.orderType:"Retail";
+const isWholesaleOrder=o=>orderTypeOf(o)==="Wholesale";
+// Amount actually collected for an order at delivery time (excludes any advance already collected earlier).
+const deliveryPaymentOf=o=>o&&o.status===S.DELI?Math.max(0,orderTotalOf(o)-Number(o.advance||0)-Number(o.pending||0)):0;
+// Chronological list of money-in events for one order: an advance (if any) taken at order time, plus a delivery payment (if delivered).
+const transactionsForOrder=o=>{
+  const t=[];
+  if(Number(o.advance)>0) t.push({id:o.id+"-adv",orderId:o.id,type:"Advance",amount:Number(o.advance),method:o.advPayMethod||"Cash",date:o.created,ts:parseLocaleDateMs(o.created)||0});
+  const delivAmt=deliveryPaymentOf(o);
+  if(delivAmt>0) t.push({id:o.id+"-pay",orderId:o.id,type:o.status===S.DELI&&o.pending>0?"Partial Payment":"Final Payment",amount:delivAmt,method:o.payMethod||"—",date:o.payAt||o.deliveredAt,ts:parseLocaleDateMs(o.payAt||o.deliveredAt)||0});
+  return t;
+};
 const backupFileName=()=>`hsm-orders-backup-${new Date().toISOString().slice(0,10)}.json`;
 function exportOrdersBackup(orders){
   const payload={
@@ -559,6 +574,7 @@ function App(){
   const [authChecked,setAuthChecked]=useState(!window.auth); // if no auth configured, skip straight to login
   const [page,setPage]=useState("dashboard");
   const [orders,setOrders]=useState([]);
+  const [wholesaleCustomers,setWholesaleCustomers]=useState([]);
   const [toast,setToast]=useState(null);
   const [menuOpen,setMenuOpen]=useState(false);
   const [loading,setLoading]=useState(false);
@@ -606,6 +622,32 @@ function App(){
   },[user]);
 
   useEffect(()=>{if(!window.db)setOrders(normalizeOrderNumbers(SEED));},[]);
+
+  // ── Wholesale customer directory — synced the same way as orders, so the ~20-25 regular
+  // wholesale firms are saved permanently and available on every device. ──
+  useEffect(()=>{
+    if(!window.db||!user)return;
+    const unsub=window.db.collection("wholesaleCustomers").orderBy("firmName").onSnapshot(snap=>{
+      setWholesaleCustomers(snap.docs.map(d=>({...d.data(),id:d.id})));
+    },err=>console.error(err));
+    return()=>unsub();
+  },[user]);
+
+  const addWholesaleCustomer=async c=>{
+    const rec={...c,id:c.id||genId(),createdAt:now2(),createdBy:user.name,active:true};
+    if(window.db){try{await window.db.collection("wholesaleCustomers").doc(rec.id).set(rec);toast2("Wholesale customer saved!");}catch(e){toast2("Save failed: "+e.message,"err");}}
+    else{setWholesaleCustomers(p=>[...p,rec].sort((a,b)=>a.firmName.localeCompare(b.firmName)));toast2("Wholesale customer saved (local only)");}
+    return rec;
+  };
+  const updWholesaleCustomer=async(id,patch)=>{
+    if(window.db){try{await window.db.collection("wholesaleCustomers").doc(id).update(patch);toast2("Customer updated");}catch(e){toast2("Update failed","err");}}
+    else{setWholesaleCustomers(p=>p.map(c=>c.id===id?{...c,...patch}:c));toast2("Customer updated");}
+  };
+  const delWholesaleCustomer=async id=>{
+    if(user.role!=="Admin"){toast2("Only Admin can remove wholesale customers","err");return;}
+    if(window.db){try{await window.db.collection("wholesaleCustomers").doc(id).update({active:false});toast2("Customer archived");}catch(e){toast2("Archive failed","err");}}
+    else{setWholesaleCustomers(p=>p.map(c=>c.id===id?{...c,active:false}:c));toast2("Customer archived");}
+  };
 
   useEffect(()=>{
     if(window.db) return;
@@ -705,6 +747,7 @@ function App(){
     {id:"orders",icon:"ti-list",label:"All Orders",roles:["all"]},
     {id:"factory",icon:"ti-tool",label:"Factory View",roles:["Admin","Factory Staff"]},
     {id:"design",icon:"ti-ruler-2",label:"Design",roles:["all"]},
+    {id:"wholesale",icon:"ti-building-store",label:"Wholesale",roles:["all"]},
     {id:"receive",icon:"ti-qrcode",label:"Receive / Scan",roles:["Admin","Office Staff"]},
     {id:"deliver",icon:"ti-truck-delivery",label:"Deliver & Pay",roles:["Admin","Office Staff"]},
     {id:"reports",icon:"ti-report",label:"Reports",roles:["Admin","Accountant"]},
@@ -764,6 +807,7 @@ function App(){
           {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user}/>}
           {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
           {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2} user={user}/>}
+          {page==="wholesale"&&<Wholesale orders={activeOrders} allOrders={orders} wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer} updWholesaleCustomer={updWholesaleCustomer} delWholesaleCustomer={delWholesaleCustomer} addOrder={addOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="receive"&&<Receive orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="deliver"&&<Deliver orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={activeOrders}/>}
@@ -1305,14 +1349,14 @@ const LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBotto
 const emptyItem=()=>({product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",total:"",advance:"",advPayMethod:"Cash",notes:"",needsDesign:false,designType:"",designCost:"",oilPolish:false});
 const DRAFT_KEY="hsm_order_draft_v1";
 
-function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource}){
+function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderType,presetCustomer,wholesaleCustomerId,onDone}){
   const orderSource=defaultSource||(user.role==="Factory Staff"?"Factory":"Office");
   const numberSource=allOrders||orders;
   const usedNums=numberSource.map(o=>o.orderNum).filter(Boolean);
   const suggestNum=usedNums.length>0?Math.max(...usedNums)+1:1;
 
-  const [customer,setCustomer]=useState("");
-  const [mobile,setMobile]=useState("");
+  const [customer,setCustomer]=useState(presetCustomer?.name||"");
+  const [mobile,setMobile]=useState(presetCustomer?.mobile||"");
   const [delivery,setDelivery]=useState(todayKey());
   const [deliveryCollectionLocation,setDeliveryCollectionLocation]=useState("");
   const [orderNumInput,setOrderNumInput]=useState(String(suggestNum));
@@ -1321,8 +1365,9 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource}){
   const [draftLoaded,setDraftLoaded]=useState(false);
   const fieldRefs=useRef({});
 
-  // ── Load draft on mount ──
+  // ── Load draft on mount ── (skipped for Wholesale orders — those aren't drafted, they're tied to a specific customer profile)
   useEffect(()=>{
+    if(wholesaleCustomerId){setDraftLoaded(true);return;}
     try{
       const raw=localStorage.getItem(DRAFT_KEY);
       if(raw){
@@ -1340,7 +1385,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource}){
 
   // ── Auto-save draft on every change ──
   useEffect(()=>{
-    if(!draftLoaded) return;
+    if(!draftLoaded||wholesaleCustomerId) return;
     try{
       localStorage.setItem(DRAFT_KEY,JSON.stringify({customer,mobile,delivery,deliveryCollectionLocation,orderNumInput,items}));
     }catch(e){/* ignore */}
@@ -1439,19 +1484,20 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource}){
         payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",
         acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",
         feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:"",
+        orderType:orderType||"Retail",wholesaleCustomerId:wholesaleCustomerId||null,
       });
     }
     const groupId=created[0].id;
     created.forEach((o,i)=>{if(i>0)o.groupId=groupId;});
     created[0].groupId=groupId;
-    Promise.all(created.map(o=>onAdd(o))).then(()=>{clearDraft();setDone(created);});
+    Promise.all(created.map(o=>onAdd(o))).then(()=>{clearDraft();setDone(created);if(onDone)onDone(created);});
   };
 
   if(done) return(
     <div style={{maxWidth:520,margin:"0 auto"}}>
       <div className="card" style={{textAlign:"center"}}>
         <div style={{width:52,height:52,background:"#e1f5ee",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 10px"}}><i className="ti ti-check" style={{fontSize:26,color:"#1d9e75"}}/></div>
-        <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>{done.length>1?`${done.length} Orders Created!`:"Order Created!"}</div>
+        <div style={{fontSize:17,fontWeight:700,marginBottom:2}}>{done.length>1?`${done.length} Orders Created!`:"Order Created!"}{wholesaleCustomerId&&<span style={{marginLeft:8,display:"inline-flex",alignItems:"center",gap:4,background:"#eef2ff",color:"#4338ca",border:"1px solid #c7d2fe",borderRadius:8,padding:"2px 8px",fontSize:11,fontWeight:700,verticalAlign:"middle"}}><i className="ti ti-building-store"/>Wholesale</span>}</div>
         <div style={{fontSize:26,fontWeight:900,color:"#cc0000",marginBottom:2}}>{done[0].orderNum?`Order ${displayOrderNum(done[0],done)}`:done[0].id}</div>
         <div style={{fontSize:11,color:"#aaa",marginBottom:16}}>{done[0].customer} · {done[0].mobile}</div>
 
@@ -1486,7 +1532,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource}){
             <button className="btn btn-green" style={{padding:"7px 12px",fontSize:12}} onClick={()=>downloadQR(done[0])}><i className="ti ti-download"/>Download</button>
           </div>
         </div>
-        <button className="btn btn-outline" onClick={()=>{setDone(null);setCustomer("");setMobile("");setDelivery(todayKey());setDeliveryCollectionLocation("");setOrderNumInput(String(suggestNum+1));setItems([emptyItem()]);clearDraft();}}><i className="ti ti-plus"/>New Order</button>
+        <button className="btn btn-outline" onClick={()=>{setDone(null);setCustomer(presetCustomer?.name||"");setMobile(presetCustomer?.mobile||"");setDelivery(todayKey());setDeliveryCollectionLocation("");setOrderNumInput(String(suggestNum+1));setItems([emptyItem()]);clearDraft();}}><i className="ti ti-plus"/>{wholesaleCustomerId?"New Order for this Customer":"New Order"}</button>
       </div>
     </div>
   );
@@ -1496,8 +1542,9 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource}){
       <div className="card">
         <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:18,flexWrap:"wrap",gap:8}}>
           <div style={{display:"flex",alignItems:"center",gap:8}}>
-            <div style={{fontWeight:700,fontSize:15}}>Create New Order</div>
+            <div style={{fontWeight:700,fontSize:15}}>{wholesaleCustomerId?"Create Wholesale Order":"Create New Order"}</div>
             {orderSource==="Factory"?<FactoryOrderBadge/>:<span title="Office order" style={{display:"inline-flex",alignItems:"center",justifyContent:"center",width:20,height:20,borderRadius:"50%",background:"#1a1a1a",color:"#fff",fontSize:11,fontWeight:900,border:"2px solid #cc0000",lineHeight:1}}>O</span>}
+            {wholesaleCustomerId&&<span style={{display:"inline-flex",alignItems:"center",gap:4,background:"#eef2ff",color:"#4338ca",border:"1px solid #c7d2fe",borderRadius:8,padding:"3px 9px",fontSize:11,fontWeight:700}}><i className="ti ti-building-store"/>Wholesale</span>}
           </div>
           <div style={{fontSize:10.5,color:"#bbb",display:"flex",alignItems:"center",gap:4}}><i className="ti ti-device-floppy"/>Draft auto-saved</div>
         </div>
@@ -1847,6 +1894,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
 function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,toast2,user}){
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
+  const [typeFl,setTypeFl]=useState("all");
   const [sel,setSel]=useState(null);
   const [delTarget,setDelTarget]=useState(null);
   const [editTarget,setEditTarget]=useState(null);
@@ -1869,7 +1917,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
       (o.oilPolish&&"oil polish op".includes(t))||
       matchesOrderNumber(o,t,allOrders||orders);
   };
-  const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
+  const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl)&&(typeFl==="all"||orderTypeOf(o)===typeFl));
   const doDelete=(o)=>{setDelTarget(o);setSel(null);};
 
   // ── Build grouped order list ──
@@ -1877,7 +1925,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   // Sub-items = same groupId but not the primary
   const groupedFiltered=useMemo(()=>{
     // First get all orders that match the filter/search
-    const matched=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl));
+    const matched=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl)&&(typeFl==="all"||orderTypeOf(o)===typeFl));
     // Also get all orders (unfiltered by search) to find siblings
     const allActive=orders;
 
@@ -1922,7 +1970,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
     // Sort by real order date/time desc (newest first). String sorting breaks DD/M/YYYY dates.
     result.sort((a,b)=>(parseLocaleDateMs(b.primary.created)||0)-(parseLocaleDateMs(a.primary.created)||0));
     return result;
-  },[orders,q,fl]);
+  },[orders,q,fl,typeFl]);
 
   const toggleGroup=gid=>setExpandedGroups(p=>{const n=new Set(p);n.has(gid)?n.delete(gid):n.add(gid);return n;});
   const todayKeyNow=todayKey();
@@ -2154,6 +2202,11 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
               <option value={S.RECV}>Received at Office</option>
               <option value={S.DELI}>Delivered & Paid</option>
             </select>
+            <select className="inp orders-filter" style={{width:"auto",minWidth:150,borderRadius:14,borderColor:"#e5e7eb",background:"#fbfcfe",height:44}} value={typeFl} onChange={e=>setTypeFl(e.target.value)}>
+              <option value="all">All Order Types</option>
+              <option value="Retail">Retail Only</option>
+              <option value="Wholesale">Wholesale Only</option>
+            </select>
             {isAdmin&&<button className="btn btn-outline orders-select-btn" style={{height:44,borderRadius:14,borderColor:bulkMode?"#111827":"#e5e7eb",background:bulkMode?"#111827":"#fff",color:bulkMode?"#fff":"#334155"}} onClick={()=>{setBulkMode(p=>!p);setSelectedIds(new Set());}}>
               <i className="ti ti-checkbox"/>{bulkMode?"Cancel Select":"Select Orders"}
             </button>}
@@ -2213,6 +2266,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
                       <OrderNumberEditor order={o} orders={allOrders||orders} updOrder={updOrder} user={user} toast2={toast2} compact/>
                       {today&&<span style={{background:"#dcfce7",color:"#15803d",border:"1px solid #bbf7d0",borderRadius:999,padding:"3px 8px",fontSize:10.5,fontWeight:900}}>TODAY</span>}
                       {isFactoryOrder(o)&&<FactoryOrderBadge/>}
+                      {isWholesaleOrder(o)&&<WholesaleBadge size="sm"/>}
                       {hasMulti&&<span style={{background:"#f1f5f9",color:"#475569",border:"1px solid #e2e8f0",borderRadius:999,padding:"3px 8px",fontSize:10.5,fontWeight:800}}>{groupOrders.length} sizes</span>}
                     </div>
                     <div style={{fontSize:16,fontWeight:850,color:"#0f172a",whiteSpace:"nowrap",overflow:"hidden",textOverflow:"ellipsis",marginBottom:3}}>{o.customer||"Unnamed Customer"}</div>
@@ -3204,6 +3258,316 @@ function Design({orders,updOrder,updOrderH,toast2,user}){
   );
 }
 
+// ── WHOLESALE MODULE ──
+// A self-contained module (mirrors the Design module's structure) for managing wholesale
+// firms and their orders. Wholesale orders are created through NewOrder like any other order —
+// they just carry orderType:"Wholesale" + wholesaleCustomerId, so they flow through the same
+// production/delivery pipeline and automatically count in overall revenue & reports, while still
+// being fully filterable/separable as their own order type.
+function WholesaleBadge({size}){
+  return <span style={{display:"inline-flex",alignItems:"center",gap:3,background:"#eef2ff",color:"#4338ca",border:"1px solid #c7d2fe",borderRadius:7,padding:size==="sm"?"1px 7px":"2px 9px",fontSize:size==="sm"?10:11,fontWeight:700}}><i className="ti ti-building-store" style={{fontSize:size==="sm"?10:12}}/>Wholesale</span>;
+}
+
+function wholesaleStatsFor(customerId,orders){
+  const custOrders=orders.filter(o=>o.wholesaleCustomerId===customerId);
+  const billable=custOrders.filter(o=>!/cancel/i.test(o.status||""));
+  const totalBusiness=billable.reduce((a,o)=>a+orderTotalOf(o),0);
+  const outstanding=billable.reduce((a,o)=>a+Number(o.pending||0),0);
+  const lastOrder=custOrders.reduce((latest,o)=>{const ms=parseLocaleDateMs(o.created)||0;return ms>latest?ms:latest;},0);
+  return {custOrders,billable,totalBusiness,outstanding,orderCount:custOrders.length,lastOrder};
+}
+
+function WholesaleCustomerModal({initial,onSave,onCancel}){
+  const [firmName,setFirmName]=useState(initial?.firmName||"");
+  const [contactPerson,setContactPerson]=useState(initial?.contactPerson||"");
+  const [mobile,setMobile]=useState(initial?.mobile||"");
+  const [address,setAddress]=useState(initial?.address||"");
+  const [gstNumber,setGstNumber]=useState(initial?.gstNumber||"");
+  const [notes,setNotes]=useState(initial?.notes||"");
+  const submit=e=>{
+    e.preventDefault();
+    if(!firmName.trim()){return;}
+    onSave({firmName:firmName.trim(),contactPerson:contactPerson.trim(),mobile:mobile.trim(),address:address.trim(),gstNumber:gstNumber.trim(),notes:notes.trim()});
+  };
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onCancel}>
+      <div className="card" style={{maxWidth:460,width:"100%",maxHeight:"90vh",overflowY:"auto"}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>{initial?"Edit Wholesale Customer":"Add Wholesale Customer"}</div>
+        <form onSubmit={submit} style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div><label style={{fontSize:11,fontWeight:600,color:"#888",display:"block",marginBottom:4}}>Firm / Customer Name *</label><input className="inp" value={firmName} onChange={e=>setFirmName(e.target.value)} placeholder="e.g. Shree Balaji Timber Traders" required autoFocus/></div>
+          <div><label style={{fontSize:11,fontWeight:600,color:"#888",display:"block",marginBottom:4}}>Contact Person</label><input className="inp" value={contactPerson} onChange={e=>setContactPerson(e.target.value)} placeholder="e.g. Ramesh Gupta"/></div>
+          <div><label style={{fontSize:11,fontWeight:600,color:"#888",display:"block",marginBottom:4}}>Mobile</label><input className="inp" value={mobile} onChange={e=>setMobile(e.target.value)} placeholder="10-digit mobile number"/></div>
+          <div><label style={{fontSize:11,fontWeight:600,color:"#888",display:"block",marginBottom:4}}>Address</label><textarea className="inp" rows={2} value={address} onChange={e=>setAddress(e.target.value)} placeholder="Firm address"/></div>
+          <div><label style={{fontSize:11,fontWeight:600,color:"#888",display:"block",marginBottom:4}}>GST Number (optional)</label><input className="inp" value={gstNumber} onChange={e=>setGstNumber(e.target.value)}/></div>
+          <div><label style={{fontSize:11,fontWeight:600,color:"#888",display:"block",marginBottom:4}}>Notes</label><textarea className="inp" rows={2} value={notes} onChange={e=>setNotes(e.target.value)} placeholder="Pricing terms, credit period, etc."/></div>
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
+            <button type="button" className="btn btn-outline" onClick={onCancel}>Cancel</button>
+            <button type="submit" className="btn btn-red">{initial?"Save Changes":"Add Customer"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function WholesaleCustomerCard({c,orders,onClick}){
+  const {totalBusiness,outstanding,orderCount}=wholesaleStatsFor(c.id,orders);
+  return(
+    <div className="card" style={{cursor:"pointer",transition:"box-shadow .15s"}} onClick={onClick}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:8,marginBottom:10}}>
+        <div style={{width:38,height:38,borderRadius:10,background:"#eef2ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><i className="ti ti-building-store" style={{color:"#4338ca",fontSize:18}}/></div>
+        <div style={{flex:1,minWidth:0}}>
+          <div style={{fontWeight:700,fontSize:14,color:"#1a1a1a",overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{c.firmName}</div>
+          {c.contactPerson&&<div style={{fontSize:11.5,color:"#999"}}>{c.contactPerson}</div>}
+        </div>
+      </div>
+      {c.mobile&&<div style={{fontSize:11.5,color:"#777",marginBottom:10}}><i className="ti ti-phone" style={{marginRight:5}}/>{c.mobile}</div>}
+      <div style={{display:"flex",gap:8}}>
+        <div style={{flex:1,background:"#fafaf8",borderRadius:8,padding:"7px 10px"}}>
+          <div style={{fontSize:9.5,color:"#aaa",marginBottom:2}}>TOTAL BUSINESS</div>
+          <div style={{fontSize:13,fontWeight:700,color:"#3b6d11"}}>{fmtM(totalBusiness)}</div>
+        </div>
+        <div style={{flex:1,background:"#fafaf8",borderRadius:8,padding:"7px 10px"}}>
+          <div style={{fontSize:9.5,color:"#aaa",marginBottom:2}}>OUTSTANDING</div>
+          <div style={{fontSize:13,fontWeight:700,color:outstanding>0?"#cc0000":"#999"}}>{fmtM(outstanding)}</div>
+        </div>
+      </div>
+      <div style={{fontSize:10.5,color:"#bbb",marginTop:8}}>{orderCount} order{orderCount===1?"":"s"}</div>
+    </div>
+  );
+}
+
+function WholesaleCustomerProfile({customer,orders,allOrders,updOrder,updOrderH,user,toast2,addOrder,onBack,onEdit,onArchive}){
+  const canManage=["Admin","Office Staff"].includes(user.role);
+  const [tab,setTab]=useState("orders");
+  const [creating,setCreating]=useState(false);
+  const [orderQ,setOrderQ]=useState("");
+  const {custOrders,billable,totalBusiness,outstanding,orderCount,lastOrder}=wholesaleStatsFor(customer.id,orders);
+
+  const filteredOrders=useMemo(()=>{
+    const q=orderQ.trim().toLowerCase();
+    const sorted=[...custOrders].sort((a,b)=>(parseLocaleDateMs(b.created)||0)-(parseLocaleDateMs(a.created)||0));
+    if(!q) return sorted;
+    return sorted.filter(o=>displayOrderNum(o,allOrders).toLowerCase().includes(q)||(o.product||"").toLowerCase().includes(q)||(o.status||"").toLowerCase().includes(q));
+  },[custOrders,orderQ,allOrders]);
+
+  const transactions=useMemo(()=>{
+    const all=[];
+    custOrders.forEach(o=>all.push(...transactionsForOrder(o)));
+    return all.sort((a,b)=>b.ts-a.ts);
+  },[custOrders]);
+
+  if(creating) return(
+    <div>
+      <button className="btn btn-outline" style={{marginBottom:16}} onClick={()=>setCreating(false)}><i className="ti ti-arrow-left"/>Back to {customer.firmName}</button>
+      <NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={allOrders} allOrders={allOrders} defaultSource="Office"
+        orderType="Wholesale" presetCustomer={{name:customer.firmName,mobile:customer.mobile}} wholesaleCustomerId={customer.id}
+        goto={()=>{}} onDone={()=>{}}/>
+    </div>
+  );
+
+  return(
+    <div>
+      <button className="btn btn-outline" style={{marginBottom:16}} onClick={onBack}><i className="ti ti-arrow-left"/>All Wholesale Customers</button>
+
+      <div className="card" style={{marginBottom:16}}>
+        <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",flexWrap:"wrap",gap:12,marginBottom:16}}>
+          <div style={{display:"flex",gap:12,alignItems:"flex-start"}}>
+            <div style={{width:48,height:48,borderRadius:12,background:"#eef2ff",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}><i className="ti ti-building-store" style={{color:"#4338ca",fontSize:22}}/></div>
+            <div>
+              <div style={{fontWeight:900,fontSize:19,color:"#1a1a1a"}}>{customer.firmName}</div>
+              {customer.contactPerson&&<div style={{fontSize:12.5,color:"#888",marginTop:2}}>{customer.contactPerson}{customer.mobile?` · ${customer.mobile}`:""}</div>}
+              {customer.address&&<div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>{customer.address}</div>}
+              {customer.gstNumber&&<div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>GST: {customer.gstNumber}</div>}
+            </div>
+          </div>
+          {canManage&&<div style={{display:"flex",gap:8}}>
+            <button className="btn btn-outline" style={{padding:"7px 12px",fontSize:12}} onClick={onEdit}><i className="ti ti-edit"/>Edit</button>
+            <button className="btn btn-red" style={{padding:"7px 12px",fontSize:12}} onClick={()=>setCreating(true)}><i className="ti ti-plus"/>New Wholesale Order</button>
+            {user.role==="Admin"&&<button className="btn btn-danger" style={{padding:"7px 12px",fontSize:12}} onClick={onArchive}><i className="ti ti-archive"/></button>}
+          </div>}
+        </div>
+        {customer.notes&&<div style={{background:"#fafaf8",borderRadius:10,padding:"8px 12px",fontSize:12,color:"#777",marginBottom:14}}><i className="ti ti-note" style={{marginRight:6}}/>{customer.notes}</div>}
+        <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:10}}>
+          {[
+            ["Total Business Done",fmtM(totalBusiness),"#3b6d11"],
+            ["Outstanding Balance",fmtM(outstanding),outstanding>0?"#cc0000":"#999"],
+            ["Total Orders",orderCount,"#185fa5"],
+            ["Last Order",lastOrder?fmtD(new Date(lastOrder)):"—","#854f0b"],
+          ].map(([l,v,c])=>(
+            <div key={l} style={{background:"#fafaf8",borderRadius:10,padding:"10px 12px"}}>
+              <div style={{fontSize:10,color:"#aaa",marginBottom:3}}>{l}</div>
+              <div style={{fontSize:17,fontWeight:800,color:c}}>{v}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div style={{display:"flex",gap:8,marginBottom:14}}>
+        {[["orders","Order History"],["transactions","Payment History"]].map(([id,label])=>(
+          <button key={id} className="btn" style={tab===id?{background:"#1a1a1a",color:"#fff"}:{background:"#fff",color:"#555",border:"1.5px solid #eee"}} onClick={()=>setTab(id)}>{label}</button>
+        ))}
+      </div>
+
+      {tab==="orders"&&<div>
+        <input className="inp" style={{marginBottom:12,maxWidth:320}} placeholder="Search this customer's orders..." value={orderQ} onChange={e=>setOrderQ(e.target.value)}/>
+        {filteredOrders.length===0&&<div style={{textAlign:"center",padding:30,color:"#bbb",background:"#fff",borderRadius:14}}>No wholesale orders yet for this customer</div>}
+        {filteredOrders.length>0&&<div style={{background:"#fff",borderRadius:14,border:"1px solid #eeebe6",overflow:"hidden"}}>
+          <div style={{overflowX:"auto"}}>
+            <table style={{width:"100%",borderCollapse:"collapse"}}>
+              <thead><tr style={{background:"#fafaf8"}}>{["Order #","Product","Total","Advance","Pending","Status","Date"].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",fontWeight:600,color:"#bbb",fontSize:11,borderBottom:"1px solid #eeebe6"}}>{h}</th>)}</tr></thead>
+              <tbody>
+                {filteredOrders.map(o=>(
+                  <tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>
+                    <td style={{padding:"9px 10px",fontWeight:700,color:"#cc0000"}}>{displayOrderNum(o,allOrders)}</td>
+                    <td style={{padding:"9px 10px"}}>{o.product} · {o.wood} · <b className="size-strong-sm">{o.size}</b> · Qty {o.qty}</td>
+                    <td style={{padding:"9px 10px",fontWeight:700}}>{fmtM(orderTotalOf(o))}</td>
+                    <td style={{padding:"9px 10px",color:"#1d9e75"}}>{fmtM(o.advance)}</td>
+                    <td style={{padding:"9px 10px",color:o.pending>0?"#cc0000":"#999",fontWeight:o.pending>0?700:400}}>{fmtM(o.pending)}</td>
+                    <td style={{padding:"9px 10px"}}><StatusBadge s={o.status}/></td>
+                    <td style={{padding:"9px 10px",color:"#bbb",fontSize:11.5}}>{orderDateTime(o).date}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>}
+      </div>}
+
+      {tab==="transactions"&&<div>
+        {transactions.length===0&&<div style={{textAlign:"center",padding:30,color:"#bbb",background:"#fff",borderRadius:14}}>No payments recorded yet</div>}
+        <div style={{display:"flex",flexDirection:"column",gap:8}}>
+          {transactions.map(t=>{
+            const o=custOrders.find(x=>x.id===t.orderId);
+            return(
+              <div key={t.id} className="card" style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                <div>
+                  <div style={{fontWeight:700,fontSize:13}}>{t.type}{o&&<span style={{color:"#bbb",fontWeight:400}}> · {displayOrderNum(o,allOrders)}</span>}</div>
+                  <div style={{fontSize:11,color:"#bbb"}}>{t.method} · {t.date||"—"}</div>
+                </div>
+                <div style={{fontSize:16,fontWeight:800,color:"#1d9e75"}}>{fmtM(t.amount)}</div>
+              </div>
+            );
+          })}
+        </div>
+      </div>}
+    </div>
+  );
+}
+
+function Wholesale({orders,allOrders,wholesaleCustomers,addWholesaleCustomer,updWholesaleCustomer,delWholesaleCustomer,addOrder,updOrder,updOrderH,user,toast2}){
+  const canManage=["Admin","Office Staff"].includes(user.role);
+  const [selectedId,setSelectedId]=useState(null);
+  const [q,setQ]=useState("");
+  const [orderQ,setOrderQ]=useState("");
+  const [modal,setModal]=useState(null); // null | "add" | customer-object-to-edit
+  const [archiveTarget,setArchiveTarget]=useState(null);
+
+  const filteredCustomers=useMemo(()=>{
+    const query=q.trim().toLowerCase();
+    const sorted=[...wholesaleCustomers].sort((a,b)=>a.firmName.localeCompare(b.firmName));
+    if(!query) return sorted;
+    return sorted.filter(c=>(c.firmName||"").toLowerCase().includes(query)||(c.contactPerson||"").toLowerCase().includes(query)||(c.mobile||"").includes(query));
+  },[wholesaleCustomers,q]);
+
+  // Independent search across all wholesale orders (by order #, product, or firm name) — separate from the customer directory search above.
+  const wholesaleOrders=useMemo(()=>orders.filter(isWholesaleOrder),[orders]);
+  const matchedOrders=useMemo(()=>{
+    const query=orderQ.trim().toLowerCase();
+    if(!query) return [];
+    return wholesaleOrders.filter(o=>displayOrderNum(o,allOrders).toLowerCase().includes(query)||(o.customer||"").toLowerCase().includes(query)||(o.product||"").toLowerCase().includes(query)).slice(0,25);
+  },[wholesaleOrders,orderQ,allOrders]);
+
+  const selectedCustomer=selectedId?wholesaleCustomers.find(c=>c.id===selectedId):null;
+
+  const saveCustomer=async data=>{
+    if(modal&&modal!=="add"){await updWholesaleCustomer(modal.id,data);}
+    else{const rec=await addWholesaleCustomer(data);if(rec)setSelectedId(rec.id);}
+    setModal(null);
+  };
+
+  const totalOutstandingAll=useMemo(()=>wholesaleCustomers.reduce((a,c)=>a+wholesaleStatsFor(c.id,orders).outstanding,0),[wholesaleCustomers,orders]);
+  const totalBusinessAll=useMemo(()=>wholesaleCustomers.reduce((a,c)=>a+wholesaleStatsFor(c.id,orders).totalBusiness,0),[wholesaleCustomers,orders]);
+
+  if(selectedCustomer){
+    return(
+      <>
+        <WholesaleCustomerProfile customer={selectedCustomer} orders={orders} allOrders={allOrders} updOrder={updOrder} updOrderH={updOrderH}
+          user={user} toast2={toast2} addOrder={addOrder} onBack={()=>setSelectedId(null)} onEdit={()=>setModal(selectedCustomer)}
+          onArchive={()=>setArchiveTarget(selectedCustomer)}/>
+        {modal&&<WholesaleCustomerModal initial={modal==="add"?null:modal} onSave={saveCustomer} onCancel={()=>setModal(null)}/>}
+        {archiveTarget&&(
+          <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setArchiveTarget(null)}>
+            <div className="card" style={{maxWidth:380}} onClick={e=>e.stopPropagation()}>
+              <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>Archive {archiveTarget.firmName}?</div>
+              <div style={{fontSize:12.5,color:"#888",marginBottom:16}}>This hides the customer from the directory. Their order history is kept and stays fully intact.</div>
+              <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+                <button className="btn btn-outline" onClick={()=>setArchiveTarget(null)}>Cancel</button>
+                <button className="btn btn-red" onClick={()=>{delWholesaleCustomer(archiveTarget.id);setArchiveTarget(null);setSelectedId(null);}}>Archive</button>
+              </div>
+            </div>
+          </div>
+        )}
+      </>
+    );
+  }
+
+  return(
+    <div>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:16}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:16}}>Wholesale Customer Directory</div>
+          <div style={{fontSize:12,color:"#999",marginTop:2}}>{wholesaleCustomers.length} customer{wholesaleCustomers.length===1?"":"s"} · {fmtM(totalBusinessAll)} total business · {fmtM(totalOutstandingAll)} outstanding</div>
+        </div>
+        {canManage&&<button className="btn btn-red" onClick={()=>setModal("add")}><i className="ti ti-plus"/>Add Wholesale Customer</button>}
+      </div>
+
+      <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:10,marginBottom:18}}>
+        <div style={{position:"relative"}}>
+          <input className="inp" placeholder="Search wholesale customers (name, contact, mobile)..." value={q} onChange={e=>setQ(e.target.value)}/>
+        </div>
+        <div style={{position:"relative"}}>
+          <input className="inp" placeholder="Search wholesale orders (order #, product)..." value={orderQ} onChange={e=>setOrderQ(e.target.value)}/>
+        </div>
+      </div>
+
+      {orderQ.trim()&&(
+        <div className="card" style={{marginBottom:18}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Wholesale Order Results ({matchedOrders.length})</div>
+          {matchedOrders.length===0&&<div style={{fontSize:12.5,color:"#bbb"}}>No wholesale orders match "{orderQ}"</div>}
+          <div style={{display:"flex",flexDirection:"column",gap:8}}>
+            {matchedOrders.map(o=>{
+              const cust=wholesaleCustomers.find(c=>c.id===o.wholesaleCustomerId);
+              return(
+                <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"8px 10px",background:"#fafaf8",borderRadius:8,gap:8,flexWrap:"wrap",cursor:cust?"pointer":"default"}} onClick={()=>cust&&setSelectedId(cust.id)}>
+                  <div>
+                    <span style={{fontWeight:700,color:"#cc0000",fontSize:12.5}}>{displayOrderNum(o,allOrders)}</span>
+                    <span style={{fontSize:12,color:"#777",marginLeft:8}}>{o.customer} · {o.product}</span>
+                  </div>
+                  <div style={{display:"flex",alignItems:"center",gap:10}}>
+                    <StatusBadge s={o.status}/>
+                    <span style={{fontWeight:700,fontSize:12.5}}>{fmtM(orderTotalOf(o))}</span>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {filteredCustomers.length===0&&(
+        <div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>
+          {wholesaleCustomers.length===0?"No wholesale customers yet — add your first one to get started.":"No customers match your search."}
+        </div>
+      )}
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fill,minmax(230px,1fr))",gap:12}}>
+        {filteredCustomers.map(c=><WholesaleCustomerCard key={c.id} c={c} orders={orders} onClick={()=>setSelectedId(c.id)}/>)}
+      </div>
+
+      {modal&&<WholesaleCustomerModal initial={modal==="add"?null:modal} onSave={saveCustomer} onCancel={()=>setModal(null)}/>}
+    </div>
+  );
+}
 
 // Parse "DD/M/YYYY, h:mm:ss am/pm" (en-IN locale string) into date parts
 function parseLocaleDate(str){
@@ -3346,7 +3710,7 @@ function Reports({orders}){
   const deli=orders.filter(o=>o.status===S.DELI);
   const pend=orders.filter(o=>o.status!==S.DELI&&o.pending>0);
   const rated=orders.filter(o=>o.customerRating);
-  const tabs=[["daily","Daily Sales"],["monthly","Monthly Reports"],["design","Design Revenue"],["pending","Pending"],["delivered","Delivered"],["customers","Customers"],["feedback","Feedback"]];
+  const tabs=[["daily","Daily Sales"],["monthly","Monthly Reports"],["design","Design Revenue"],["wholesale","Wholesale"],["pending","Pending"],["delivered","Delivered"],["customers","Customers"],["feedback","Feedback"]];
   const labels={orderNum:"Order #",factoryOrder:"Factory",id:"Order ID",customer:"Customer",mobile:"Mobile",product:"Product",wood:"Wood",size:"Size",qty:"Qty",total:"Total",designType:"Design Type",designCost:"Design Cost",advance:"Advance",pending:"Pending",status:"Status",payMethod:"Payment",created:"Order Date & Time",deliveryCollectionLocation:"Collection Location",deliveredAt:"Delivered",deliveredLocation:"Location"};
   const fv=(k,v,o={})=>{
     if(k==="orderNum") return v?displayOrderNum(o,orders):"—";
@@ -3665,6 +4029,10 @@ function Reports({orders}){
         <DesignRevenueTab orders={orders}/>
       )}
 
+      {tab==="wholesale"&&(
+        <WholesaleReportTab orders={orders}/>
+      )}
+
       {tab==="feedback"&&(
         <FeedbackTab orders={orders} rated={rated}/>
       )}
@@ -3788,6 +4156,127 @@ function DesignRevenueTab({orders}){
                 <td colSpan={3} style={{padding:"10px",fontWeight:700,color:"#a35a00"}}>Total</td>
                 <td style={{padding:"10px",fontWeight:900,color:"#cc6600",fontSize:15}}>{fmtM(totalRev)}</td>
                 <td colSpan={2}/>
+              </tr>
+            </tbody>
+          </table>
+        </div>}
+      </div>
+    </div>
+  );
+}
+
+// ── WHOLESALE REPORT TAB (Reports) ── Wholesale orders already count in every other report
+// (Daily/Monthly totals include them like any order); this tab isolates them for a focused view.
+function WholesaleReportTab({orders}){
+  const [range,setRange]=useState("month");
+  const [dateFrom,setDateFrom]=useState(todayKey());
+  const [dateTo,setDateTo]=useState(todayKey());
+
+  const wsOrders=orders.filter(isWholesaleOrder);
+
+  const inRange=o=>{
+    const p=parseLocaleDate(o.created);
+    if(!p) return false;
+    const dk=p.dateKey;
+    const today=todayKey();
+    const d=new Date();
+    if(range==="today") return dk===today;
+    if(range==="yesterday"){const y=new Date(d);y.setDate(d.getDate()-1);return dk===`${y.getFullYear()}-${String(y.getMonth()+1).padStart(2,"0")}-${String(y.getDate()).padStart(2,"0")}`;}
+    if(range==="week"){const w=new Date(d);w.setDate(d.getDate()-6);return dk>=`${w.getFullYear()}-${String(w.getMonth()+1).padStart(2,"0")}-${String(w.getDate()).padStart(2,"0")}`&&dk<=today;}
+    if(range==="month"){return p.monthKey===today.slice(0,7);}
+    if(range==="custom") return dk>=dateFrom&&dk<=dateTo;
+    return true;
+  };
+  const filtered=wsOrders.filter(inRange);
+  const billable=filtered.filter(o=>!/cancel/i.test(o.status||""));
+  const totalRev=billable.reduce((a,o)=>a+orderTotalOf(o),0);
+  const totalOutstanding=billable.reduce((a,o)=>a+Number(o.pending||0),0);
+  const avgOrder=billable.length?totalRev/billable.length:0;
+
+  // Group by wholesale customer (firm name)
+  const byFirm={};
+  billable.forEach(o=>{const f=o.customer||"Unknown Firm";if(!byFirm[f])byFirm[f]={count:0,total:0};byFirm[f].count++;byFirm[f].total+=orderTotalOf(o);});
+  const firms=Object.entries(byFirm).sort((a,b)=>b[1].total-a[1].total);
+
+  const RANGE_BTNS=[["today","Today"],["yesterday","Yesterday"],["week","This Week"],["month","This Month"],["custom","Custom"]];
+
+  return(
+    <div>
+      <div style={{display:"flex",gap:8,flexWrap:"wrap",marginBottom:16}}>
+        {RANGE_BTNS.map(([k,l])=>(
+          <button key={k} className="btn" style={{background:range===k?"#4338ca":"#fff",color:range===k?"#fff":"#555",border:`1.5px solid ${range===k?"#4338ca":"#ddd"}`,fontSize:12}} onClick={()=>setRange(k)}>{l}</button>
+        ))}
+      </div>
+      {range==="custom"&&(
+        <div style={{display:"flex",gap:10,alignItems:"center",marginBottom:16,flexWrap:"wrap"}}>
+          <input type="date" className="inp" style={{width:"auto"}} value={dateFrom} onChange={e=>setDateFrom(e.target.value)}/>
+          <span style={{color:"#bbb"}}>to</span>
+          <input type="date" className="inp" style={{width:"auto"}} value={dateTo} onChange={e=>setDateTo(e.target.value)}/>
+        </div>
+      )}
+
+      <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(140px,1fr))",gap:12,marginBottom:20}}>
+        <div className="card" style={{padding:"14px 16px",background:"linear-gradient(135deg,#4338ca,#6366f1)",border:"none"}}>
+          <div style={{fontSize:10.5,color:"rgba(255,255,255,.75)",marginBottom:5,fontWeight:600}}>Wholesale Revenue</div>
+          <div style={{fontSize:26,fontWeight:900,color:"#fff"}}>{fmtM(totalRev)}</div>
+        </div>
+        <div className="card" style={{padding:"14px 16px"}}>
+          <div style={{fontSize:10.5,color:"#bbb",marginBottom:5}}>Wholesale Orders</div>
+          <div style={{fontSize:24,fontWeight:700,color:"#1a1a1a"}}>{billable.length}</div>
+        </div>
+        <div className="card" style={{padding:"14px 16px"}}>
+          <div style={{fontSize:10.5,color:"#bbb",marginBottom:5}}>Outstanding</div>
+          <div style={{fontSize:24,fontWeight:700,color:totalOutstanding>0?"#cc0000":"#999"}}>{fmtM(totalOutstanding)}</div>
+        </div>
+        <div className="card" style={{padding:"14px 16px"}}>
+          <div style={{fontSize:10.5,color:"#bbb",marginBottom:5}}>Avg Order Value</div>
+          <div style={{fontSize:24,fontWeight:700,color:"#1a1a1a"}}>{fmtM(avgOrder)}</div>
+        </div>
+      </div>
+
+      {firms.length>0&&(
+        <div className="card" style={{marginBottom:16}}>
+          <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:14}}>By Wholesale Customer</div>
+          {firms.map(([f,d])=>{
+            const pct=totalRev>0?Math.round((d.total/totalRev)*100):0;
+            return(
+              <div key={f} style={{marginBottom:10}}>
+                <div style={{display:"flex",justifyContent:"space-between",fontSize:12.5,marginBottom:4}}>
+                  <span style={{fontWeight:600,color:"#555"}}>{f}</span>
+                  <span style={{fontWeight:700,color:"#4338ca"}}>{fmtM(d.total)} <span style={{fontSize:11,color:"#bbb"}}>· {d.count} orders</span></span>
+                </div>
+                <div style={{background:"#eef2ff",borderRadius:6,height:10,overflow:"hidden"}}>
+                  <div style={{width:`${pct}%`,height:"100%",background:"#4338ca",borderRadius:6,transition:"width .3s"}}/>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+
+      <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Order Details</div>
+      {filtered.length===0&&<div style={{textAlign:"center",padding:30,color:"#bbb",background:"#fff",borderRadius:14}}>No wholesale orders for this period</div>}
+      <div style={{background:"#fff",borderRadius:14,border:"1px solid #eeebe6",overflow:"hidden"}}>
+        {filtered.length>0&&<div style={{overflowX:"auto"}}>
+          <table style={{width:"100%",borderCollapse:"collapse"}}>
+            <thead><tr style={{background:"#fafaf8"}}>
+              {["Order #","Firm","Total","Pending","Status","Date"].map(h=><th key={h} style={{padding:"9px 10px",textAlign:"left",fontWeight:600,color:"#bbb",fontSize:11,borderBottom:"1px solid #eeebe6"}}>{h}</th>)}
+            </tr></thead>
+            <tbody>
+              {filtered.map(o=>(
+                <tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>
+                  <td style={{padding:"9px 10px",fontWeight:900,color:"#cc0000"}}>{displayOrderNum(o,orders)}</td>
+                  <td style={{padding:"9px 10px",fontWeight:600}}>{o.customer}</td>
+                  <td style={{padding:"9px 10px"}}>{fmtM(orderTotalOf(o))}</td>
+                  <td style={{padding:"9px 10px",color:o.pending>0?"#cc0000":"#999",fontWeight:o.pending>0?700:400}}>{fmtM(o.pending)}</td>
+                  <td style={{padding:"9px 10px"}}><StatusBadge s={o.status}/></td>
+                  <td style={{padding:"9px 10px",color:"#bbb",fontSize:11.5}}>{orderDateTime(o).date}</td>
+                </tr>
+              ))}
+              <tr style={{background:"#eef2ff",borderTop:"2px solid #c7d2fe"}}>
+                <td colSpan={2} style={{padding:"10px",fontWeight:700,color:"#4338ca"}}>Total</td>
+                <td style={{padding:"10px",fontWeight:900,color:"#4338ca",fontSize:15}}>{fmtM(totalRev)}</td>
+                <td colSpan={3}/>
               </tr>
             </tbody>
           </table>
