@@ -670,8 +670,10 @@ function App(){
   useEffect(()=>{if(!window.db)setOrders(normalizeOrderNumbers(SEED));},[]);
 
   // ── OneSignal: tag this device as "factory" so Factory Staff AND Admin receive
-  // new-order push notifications (Office/Accounts do not), and ask once for
-  // notification permission. ──
+  // new-order push notifications (Office/Accounts do not). Tagging can happen
+  // automatically, but browsers block auto-triggered permission prompts — that
+  // part needs an actual click, handled by the banner below. ──
+  const [pushPermission,setPushPermission]=useState(null); // null=unknown, "granted"/"denied"/"default"
   useEffect(()=>{
     if(!user||!ONESIGNAL_READY) return;
     if(user.role!=="Factory Staff"&&user.role!=="Admin") return;
@@ -679,11 +681,20 @@ function App(){
     window.OneSignalDeferred.push(async OneSignal=>{
       try{
         await OneSignal.User.addTag("role","factory");
-        const perm=OneSignal.Notifications.permission;
-        if(!perm) await OneSignal.Notifications.requestPermission();
+        setPushPermission(OneSignal.Notifications.permission?"granted":(Notification&&Notification.permission==="denied"?"denied":"default"));
       }catch(e){console.error("OneSignal tagging failed:",e);}
     });
   },[user]);
+
+  const enablePushNotifications=()=>{
+    window.OneSignalDeferred=window.OneSignalDeferred||[];
+    window.OneSignalDeferred.push(async OneSignal=>{
+      try{
+        await OneSignal.Notifications.requestPermission();
+        setPushPermission(OneSignal.Notifications.permission?"granted":"denied");
+      }catch(e){console.error("Permission request failed:",e);}
+    });
+  };
 
   // ── Deep link: tapping a "new order" push opens the app straight to Factory View ──
   useEffect(()=>{
@@ -877,6 +888,17 @@ function App(){
         </header>
         {loading&&<div style={{background:"#fff8f8",borderBottom:"1px solid #ffe0e0",padding:"8px 20px",fontSize:12,color:"#cc0000",display:"flex",alignItems:"center",gap:8}}><div style={{width:12,height:12,border:"2px solid #cc0000",borderTopColor:"transparent",borderRadius:"50%",animation:"spin .8s linear infinite"}}/>Syncing...</div>}
         {!dbMode&&<div style={{background:"#fffbea",borderBottom:"1px solid #ffe58f",padding:"8px 20px",fontSize:12,color:"#7a5c00",display:"flex",alignItems:"center",gap:8}}><i className="ti ti-alert-triangle" style={{fontSize:14}}/>Running in local mode — Firebase not configured.</div>}
+        {ONESIGNAL_READY&&(user.role==="Factory Staff"||user.role==="Admin")&&pushPermission==="default"&&(
+          <div style={{background:"#eef6ff",borderBottom:"1px solid #cfe4ff",padding:"9px 20px",fontSize:12.5,color:"#0a4a8f",display:"flex",alignItems:"center",justifyContent:"space-between",gap:10,flexWrap:"wrap"}}>
+            <span><i className="ti ti-bell-ringing" style={{marginRight:6}}/>Turn on notifications to get alerted the moment a new order comes in — even with the app closed.</span>
+            <button className="btn" style={{background:"#0a4a8f",color:"#fff",padding:"6px 14px",fontSize:12}} onClick={enablePushNotifications}>Enable Notifications</button>
+          </div>
+        )}
+        {ONESIGNAL_READY&&(user.role==="Factory Staff"||user.role==="Admin")&&pushPermission==="denied"&&(
+          <div style={{background:"#fff5f5",borderBottom:"1px solid #ffd6d6",padding:"9px 20px",fontSize:12.5,color:"#a30000"}}>
+            <i className="ti ti-bell-off" style={{marginRight:6}}/>Notifications are blocked for this site. Enable them from your browser's site settings (click the padlock icon next to the address bar) to receive new-order alerts.
+          </div>
+        )}
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
           {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office"/>}
