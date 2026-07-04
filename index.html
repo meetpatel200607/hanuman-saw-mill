@@ -88,8 +88,11 @@ const usernameToEmail=u=>String(u||"").trim().toLowerCase().replace(/\s+/g,"")+"
 
 // ── OneSignal Web Push config (free plan) ──
 const ONESIGNAL_APP_ID="465590eb-68ac-4093-b379-fd201435a9fa";
-const ONESIGNAL_REST_API_KEY="os_v2_app_izkzb23ivrajhm3z7uqbinnj7iazkrhl6vzu4xvkw6onsypvf35zaqewc3sl2gzyqqubwkm2zsp26tbr3udysh4wg4bjluc2k4pp45y";
-const ONESIGNAL_READY=!ONESIGNAL_APP_ID.includes("PASTE_YOUR")&&!ONESIGNAL_REST_API_KEY.includes("PASTE_YOUR");
+// The actual REST API key is NOT stored here anymore — it lives only inside the
+// Cloudflare Worker relay (see setup notes) so it's never exposed in browser code.
+// PASTE YOUR CLOUDFLARE WORKER URL BELOW once you've deployed it:
+const PUSH_RELAY_URL="https://calm-heart-8027.meetpatel200607.workers.dev";
+const ONESIGNAL_READY=!ONESIGNAL_APP_ID.includes("PASTE_YOUR")&&!PUSH_RELAY_URL.includes("PASTE_YOUR");
 
 window.OneSignalDeferred=window.OneSignalDeferred||[];
 if(ONESIGNAL_READY){
@@ -137,29 +140,24 @@ const collectionLocationOf=o=>o&&o.deliveryCollectionLocation?o.deliveryCollecti
 const orderSourceOf=o=>(o&&o.orderSource)?o.orderSource:(o&&o.createdFromFactory?"Factory":"Office");
 const isFactoryOrder=o=>orderSourceOf(o)==="Factory";
 
-// ── OneSignal push: alert Factory Staff devices the moment an Office order is created ──
-// Sent directly from this (office) device — Factory devices receive it even if the
-// app/browser is fully closed, as long as they've enabled notifications once.
-// Only devices tagged role="factory" are targeted (see the tagging effect in App below),
-// so Office/Admin/Accounts never receive these.
+// ── Push relay: alert Factory Staff/Admin devices the moment an Office order is created ──
+// Browsers can't call OneSignal's send-notification API directly (it's blocked by CORS),
+// so this calls a tiny Cloudflare Worker instead, which forwards the request to OneSignal
+// server-to-server. The Worker also keeps the OneSignal REST API key out of this file
+// entirely — see the setup notes for how the Worker is configured.
 const notifyFactoryOfNewOrder=async order=>{
   if(!ONESIGNAL_READY) return;
   try{
-    await fetch("https://api.onesignal.com/notifications",{
+    await fetch(PUSH_RELAY_URL,{
       method:"POST",
-      headers:{
-        "Content-Type":"application/json; charset=utf-8",
-        "Authorization":"Key "+ONESIGNAL_REST_API_KEY
-      },
+      headers:{"Content-Type":"application/json"},
       body:JSON.stringify({
-        app_id:ONESIGNAL_APP_ID,
-        filters:[{field:"tag",key:"role",relation:"=",value:"factory"}],
-        headings:{en:"New Order — Action Needed"},
-        contents:{en:"Order "+fmtONForSource(order.orderNum,orderSourceOf(order))+" for "+(order.customer||"a customer")+" needs acceptance."},
+        orderLabel:fmtONForSource(order.orderNum,orderSourceOf(order)),
+        customer:order.customer||"a customer",
         url:location.origin+location.pathname+"?view=factory"
       })
     });
-  }catch(e){console.error("OneSignal push failed:",e);}
+  }catch(e){console.error("Push relay failed:",e);}
 };
 const orderSuffixForIndex=i=>i>0?String.fromCharCode(65+i):"";
 const orderGroupIndex=(o,orders=[])=>{
