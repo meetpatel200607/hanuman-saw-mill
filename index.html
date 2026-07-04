@@ -37,6 +37,8 @@ if("serviceWorker" in navigator){
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.12.0/firebase-auth-compat.js"></script>
+<!-- ── OneSignal Web Push (free plan) ── -->
+<script src="https://cdn.onesignal.com/sdks/OneSignalSDK.page.js" defer></script>
 <style>
   *{box-sizing:border-box;margin:0;padding:0;}
   body{font-family:'Segoe UI',sans-serif;background:#f5f5f3;}
@@ -83,6 +85,25 @@ else{window.db=null;window.auth=null;}
 // so we convert it consistently behind the scenes — no password ever lives in this file.
 const USERNAME_DOMAIN="hanumansawmill.local";
 const usernameToEmail=u=>String(u||"").trim().toLowerCase().replace(/\s+/g,"")+"@"+USERNAME_DOMAIN;
+
+// ── OneSignal Web Push config (free plan) ──
+const ONESIGNAL_APP_ID="465590eb-68ac-4093-b379-fd201435a9fa";
+const ONESIGNAL_REST_API_KEY="os_v2_app_izkzb23ivrajhm3z7uqbinnj7iazkrhl6vzu4xvkw6onsypvf35zaqewc3sl2gzyqqubwkm2zsp26tbr3udysh4wg4bjluc2k4pp45y";
+const ONESIGNAL_READY=!ONESIGNAL_APP_ID.includes("PASTE_YOUR")&&!ONESIGNAL_REST_API_KEY.includes("PASTE_YOUR");
+
+window.OneSignalDeferred=window.OneSignalDeferred||[];
+if(ONESIGNAL_READY){
+  window.OneSignalDeferred.push(async function(OneSignal){
+    // This app already registers its own service-worker.js (for offline/PWA support),
+    // so OneSignal is told to reuse that same file/scope instead of installing a second
+    // service worker — see the manual setup notes for the one line to add to it.
+    await OneSignal.init({
+      appId:ONESIGNAL_APP_ID,
+      serviceWorkerParam:{scope:"/"},
+      serviceWorkerPath:"service-worker.js"
+    });
+  });
+}
 </script>
 
 <script type="text/babel">
@@ -115,6 +136,31 @@ const collectionLocationOf=o=>o&&o.deliveryCollectionLocation?o.deliveryCollecti
 // Source of an order — "Factory" or "Office". Falls back to legacy fields for records created before orderSource existed.
 const orderSourceOf=o=>(o&&o.orderSource)?o.orderSource:(o&&o.createdFromFactory?"Factory":"Office");
 const isFactoryOrder=o=>orderSourceOf(o)==="Factory";
+
+// ── OneSignal push: alert Factory Staff devices the moment an Office order is created ──
+// Sent directly from this (office) device — Factory devices receive it even if the
+// app/browser is fully closed, as long as they've enabled notifications once.
+// Only devices tagged role="factory" are targeted (see the tagging effect in App below),
+// so Office/Admin/Accounts never receive these.
+const notifyFactoryOfNewOrder=async order=>{
+  if(!ONESIGNAL_READY) return;
+  try{
+    await fetch("https://api.onesignal.com/notifications",{
+      method:"POST",
+      headers:{
+        "Content-Type":"application/json; charset=utf-8",
+        "Authorization":"Key "+ONESIGNAL_REST_API_KEY
+      },
+      body:JSON.stringify({
+        app_id:ONESIGNAL_APP_ID,
+        filters:[{field:"tag",key:"role",relation:"=",value:"factory"}],
+        headings:{en:"New Order — Action Needed"},
+        contents:{en:"Order "+fmtONForSource(order.orderNum,orderSourceOf(order))+" for "+(order.customer||"a customer")+" needs acceptance."},
+        url:location.origin+location.pathname+"?view=factory"
+      })
+    });
+  }catch(e){console.error("OneSignal push failed:",e);}
+};
 const orderSuffixForIndex=i=>i>0?String.fromCharCode(65+i):"";
 const orderGroupIndex=(o,orders=[])=>{
   if(!o) return 0;
@@ -623,6 +669,33 @@ function App(){
 
   useEffect(()=>{if(!window.db)setOrders(normalizeOrderNumbers(SEED));},[]);
 
+  // ── OneSignal: tag this device as "factory" so Factory Staff AND Admin receive
+  // new-order push notifications (Office/Accounts do not), and ask once for
+  // notification permission. ──
+  useEffect(()=>{
+    if(!user||!ONESIGNAL_READY) return;
+    if(user.role!=="Factory Staff"&&user.role!=="Admin") return;
+    window.OneSignalDeferred=window.OneSignalDeferred||[];
+    window.OneSignalDeferred.push(async OneSignal=>{
+      try{
+        await OneSignal.User.addTag("role","factory");
+        const perm=OneSignal.Notifications.permission;
+        if(!perm) await OneSignal.Notifications.requestPermission();
+      }catch(e){console.error("OneSignal tagging failed:",e);}
+    });
+  },[user]);
+
+  // ── Deep link: tapping a "new order" push opens the app straight to Factory View ──
+  useEffect(()=>{
+    if(!user) return;
+    const params=new URLSearchParams(window.location.search);
+    if(params.get("view")==="factory"&&(user.role==="Factory Staff"||user.role==="Admin")){
+      setPage("factory");
+      const cleanUrl=window.location.origin+window.location.pathname;
+      window.history.replaceState({},"",cleanUrl);
+    }
+  },[user]);
+
   // ── Wholesale customer directory — synced the same way as orders, so the ~20-25 regular
   // wholesale firms are saved permanently and available on every device. ──
   useEffect(()=>{
@@ -674,6 +747,9 @@ function App(){
       try{await window.db.collection("orders").doc(o.id).set({...orderWithHistory,createdTs:firebase.firestore.FieldValue.serverTimestamp()});toast2("Order saved to cloud!");}
       catch(e){toast2("Save failed: "+e.message,"err");}
     }else{setOrders(p=>[orderWithHistory,...p]);toast2("Order created (local only)");}
+    // Office-created orders need Factory to accept them — ping Factory Staff devices.
+    // Orders created directly at the Factory don't need this (Factory already knows).
+    if(dept==="Office") notifyFactoryOfNewOrder(orderWithHistory);
   };
 
   const updOrder=async(id,patch)=>{
