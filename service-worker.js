@@ -1,3 +1,4 @@
+importScripts("https://cdn.onesignal.com/sdks/OneSignalSDK.page.js");
 const CACHE_NAME = "hsm-pwa-v1";
 const APP_SHELL = [
   "./",
