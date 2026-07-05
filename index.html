@@ -2947,42 +2947,66 @@ function Receive({orders,updOrder,updOrderH,user,toast2}){
       {foundGroup&&(
         <div className="card">
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",marginBottom:14}}>
-            <div style={{fontWeight:700,fontSize:16}}>Order Found{foundGroup.length>1?` — ${foundGroup.length} items`:""}</div>
+            <div style={{fontWeight:700,fontSize:16}}>Order Found</div>
             <button onClick={()=>{setFoundGroup(null);setMid("");}} style={{background:"none",border:"none",cursor:"pointer",fontSize:20,color:"#bbb"}}><i className="ti ti-x"/></button>
           </div>
           <div style={{background:"#fafaf8",borderRadius:12,padding:14,marginBottom:14}}>
             <div style={{fontSize:22,fontWeight:900,color:"#cc0000",marginBottom:2}}>
               <OrderNumberEditor order={primary} orders={orders} updOrder={updOrder} user={user} toast2={toast2} onLocalUpdate={o=>setFoundGroup(g=>g.map(x=>x.id===primary.id?o:x))}/>
             </div>
+            <div style={{fontSize:11,color:"#aaa",marginBottom:4}}>{primary.id}</div>
             <div style={{fontWeight:700,fontSize:15,marginBottom:2}}>{primary.customer}</div>
-            <div style={{fontSize:13,color:"#999"}}>{primary.mobile}</div>
+            <div style={{fontSize:13,color:"#999",marginBottom:12}}>{primary.mobile}</div>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:8,fontSize:12.5}}>
+              {[["Product",primary.product],["Wood",primary.wood],["Size",primary.size],["Qty",primary.qty],["Order Date",orderDateTime(primary).date],["Order Time",orderDateTime(primary).time],["Collection",collectionLocationOf(primary)],
+              ...(!isFactoryOrder(primary)&&primary.status===S.TRANSIT?[["Total",fmtM(orderTotalOf(primary))],["Received",fmtM(primary.advance)],["Pending",fmtM(primary.pending)]]:[])
+              ].map(([k,v])=>(
+                <div key={k} style={{background:k==="Size"?"#f5f0e8":"transparent",borderRadius:k==="Size"?8:0,padding:k==="Size"?"6px 8px":0,gridColumn:k==="Size"?"span 2":undefined,border:k==="Size"?"1.5px solid #d5cfc4":"none"}}><span style={{color:"#bbb"}}>{k}: </span><b className={k==="Size"?"size-strong":""}>{v}</b></div>
+              ))}
+            </div>
           </div>
-          <div style={{display:"flex",flexDirection:"column",gap:10,marginBottom:14}}>
-            {foundGroup.map(o=>(
-              <div key={o.id} style={{border:"1px solid #eeebe6",borderRadius:10,padding:12}}>
-                <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
-                  <div>
-                    <div style={{fontSize:13,fontWeight:700}}>{displayOrderNum(o,orders)} · <b className="size-strong-sm">{o.size}</b></div>
-                    <div style={{fontSize:11.5,color:"#999"}}>{o.product} · {o.wood} · Qty {o.qty}</div>
+          <div style={{marginBottom:14}}><StatusBadge s={primary.status}/></div>
+          {isFactoryOrder(primary)
+            ?<div style={{padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:600,fontSize:13,textAlign:"center"}}>🏭 Factory order — skips Receive/Scan. Deliver it from Factory View.</div>
+            :primary.status===S.TRANSIT
+            ?<button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:15}} onClick={()=>markRecvItem(primary)}><i className="ti ti-check"/>Mark as Received at Office</button>
+            :primary.status===S.PEND
+            ?<div style={{padding:12,background:"#ffe9e9",borderRadius:10,color:"#cc0000",fontWeight:600,fontSize:13,textAlign:"center"}}>⏳ Order not yet accepted by factory</div>
+            :primary.status===S.PROD
+            ?<div style={{padding:12,background:"#faeeda",borderRadius:10,color:"#854f0b",fontWeight:600,fontSize:13,textAlign:"center"}}>🛠 Still in production — not dispatched yet</div>
+            :<div style={{padding:12,background:"#e1f5ee",borderRadius:10,color:"#0f6e56",fontWeight:600,fontSize:13,textAlign:"center"}}>✓ Already Received – {primary.receivedAt}</div>}
+
+          {foundGroup.length>1&&(
+            <div style={{marginTop:18,paddingTop:18,borderTop:"1px solid #f0ede8"}}>
+              <div style={{fontSize:11,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Other Sizes In This Order</div>
+              <div style={{display:"flex",flexDirection:"column",gap:10}}>
+                {foundGroup.filter(o=>o.id!==primary.id).map(o=>(
+                  <div key={o.id} style={{border:"1px solid #eeebe6",borderRadius:10,padding:12}}>
+                    <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",gap:10,flexWrap:"wrap"}}>
+                      <div>
+                        <div style={{fontSize:13,fontWeight:700}}>{displayOrderNum(o,orders)} · <b className="size-strong-sm">{o.size}</b></div>
+                        <div style={{fontSize:11.5,color:"#999"}}>{o.product} · {o.wood} · Qty {o.qty}</div>
+                      </div>
+                      <StatusBadge s={o.status}/>
+                    </div>
+                    <div style={{marginTop:8}}>
+                      {isFactoryOrder(o)
+                        ?<div style={{padding:8,background:"#e1f5ee",borderRadius:8,color:"#0f6e56",fontWeight:600,fontSize:12,textAlign:"center"}}>🏭 Factory order — deliver from Factory View</div>
+                        :o.status===S.TRANSIT
+                        ?<button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:13}} onClick={()=>markRecvItem(o)}><i className="ti ti-check"/>Mark as Received</button>
+                        :o.status===S.PEND
+                        ?<div style={{padding:8,background:"#ffe9e9",borderRadius:8,color:"#cc0000",fontWeight:600,fontSize:12,textAlign:"center"}}>⏳ Not yet accepted by factory</div>
+                        :o.status===S.PROD
+                        ?<div style={{padding:8,background:"#faeeda",borderRadius:8,color:"#854f0b",fontWeight:600,fontSize:12,textAlign:"center"}}>🛠 Still in production</div>
+                        :<div style={{padding:8,background:"#e1f5ee",borderRadius:8,color:"#0f6e56",fontWeight:600,fontSize:12,textAlign:"center"}}>✓ Already Received – {o.receivedAt}</div>}
+                    </div>
                   </div>
-                  <StatusBadge s={o.status}/>
-                </div>
-                <div style={{marginTop:8}}>
-                  {isFactoryOrder(o)
-                    ?<div style={{padding:8,background:"#e1f5ee",borderRadius:8,color:"#0f6e56",fontWeight:600,fontSize:12,textAlign:"center"}}>🏭 Factory order — deliver from Factory View</div>
-                    :o.status===S.TRANSIT
-                    ?<button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:13}} onClick={()=>markRecvItem(o)}><i className="ti ti-check"/>Mark as Received</button>
-                    :o.status===S.PEND
-                    ?<div style={{padding:8,background:"#ffe9e9",borderRadius:8,color:"#cc0000",fontWeight:600,fontSize:12,textAlign:"center"}}>⏳ Not yet accepted by factory</div>
-                    :o.status===S.PROD
-                    ?<div style={{padding:8,background:"#faeeda",borderRadius:8,color:"#854f0b",fontWeight:600,fontSize:12,textAlign:"center"}}>🛠 Still in production</div>
-                    :<div style={{padding:8,background:"#e1f5ee",borderRadius:8,color:"#0f6e56",fontWeight:600,fontSize:12,textAlign:"center"}}>✓ Already Received – {o.receivedAt}</div>}
-                </div>
+                ))}
               </div>
-            ))}
-          </div>
-          {foundGroup.filter(receivable).length>1&&(
-            <button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:15}} onClick={markRecvAll}><i className="ti ti-checks"/>Mark All {foundGroup.filter(receivable).length} Items Received</button>
+              {foundGroup.filter(receivable).length>1&&(
+                <button className="btn btn-green" style={{width:"100%",justifyContent:"center",fontSize:15,marginTop:12}} onClick={markRecvAll}><i className="ti ti-checks"/>Mark All {foundGroup.filter(receivable).length} Items Received</button>
+              )}
+            </div>
           )}
         </div>
       )}
