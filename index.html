@@ -190,9 +190,12 @@ const orderNumberTaken=(num,source,orders,excludeOrderId,excludeGroupId)=>{
 const matchesOrderNumber=(o,text,orders=[])=>{
   const t=String(text||"").trim().toLowerCase();
   if(!o||!t||!o.orderNum) return false;
-  const shown=displayOrderNum(o,orders).toLowerCase();
+  const shown=displayOrderNum(o,orders).toLowerCase(); // "#026" for Office, "f026" for Factory — already source-correct
   const raw=(isFactoryOrder(o)?"f":"")+String(o.orderNum).toLowerCase()+String(o.orderSuffix||"").toLowerCase();
-  return String(o.orderNum)===t||fmtON(o.orderNum).toLowerCase()===t||("#"+String(o.orderNum))===t||shown===t||shown.replace("#","")===t||raw===t;
+  // The bare "#026"/"026" forms are Office-style and must not match a Factory order sharing the same
+  // number (Office #26 and Factory F026 can coexist), so only allow them for non-Factory orders.
+  const officeStyleMatch=!isFactoryOrder(o)&&(fmtON(o.orderNum).toLowerCase()===t||("#"+String(o.orderNum))===t);
+  return String(o.orderNum)===t||officeStyleMatch||shown===t||shown.replace("#","")===t||raw===t;
 };
 const designCostOf=o=>Number(o&&o.needsDesign?o.designCost:0)||0;
 const productTotalOf=o=>{
@@ -1453,7 +1456,11 @@ const DRAFT_KEY="hsm_order_draft_v1";
 function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderType,presetCustomer,wholesaleCustomerId,onDone,wholesaleCustomers,addWholesaleCustomer}){
   const orderSource=defaultSource||(user.role==="Factory Staff"?"Factory":"Office");
   const numberSource=allOrders||orders;
-  const usedNums=numberSource.map(o=>o.orderNum).filter(Boolean);
+  // Each source (Office / Factory) has its own independent sequential numbering series —
+  // #001,#002... for Office and F001,F002... for Factory — so the suggestion must only look
+  // at orders from the same source, otherwise a busy Office series would push Factory's
+  // suggested number far ahead (and vice versa).
+  const usedNums=numberSource.filter(o=>orderSourceOf(o)===orderSource).map(o=>o.orderNum).filter(Boolean);
   const suggestNum=usedNums.length>0?Math.max(...usedNums)+1:1;
 
   // ── Order Type ── When orderType is passed in explicitly (the "New Wholesale Order" flow launched
@@ -2113,6 +2120,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
   const [typeFl,setTypeFl]=useState("all");
+  const [sourceFl,setSourceFl]=useState("all"); // "all" = Office+Factory (existing All Orders view), "Factory" = Factory Orders view only
   const [sel,setSel]=useState(null);
 
   // ── Deep-link into this page's own Order Details view ── lets other modules (e.g. the
@@ -2144,7 +2152,8 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
       (o.oilPolish&&"oil polish op".includes(t))||
       matchesOrderNumber(o,t,allOrders||orders);
   };
-  const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl)&&(typeFl==="all"||orderTypeOf(o)===typeFl));
+  const matchSource=o=>sourceFl==="all"||orderSourceOf(o)===sourceFl;
+  const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl)&&(typeFl==="all"||orderTypeOf(o)===typeFl)&&matchSource(o));
   const doDelete=(o)=>{setDelTarget(o);setSel(null);};
 
   // ── Build grouped order list ──
@@ -2152,7 +2161,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   // Sub-items = same groupId but not the primary
   const groupedFiltered=useMemo(()=>{
     // First get all orders that match the filter/search
-    const matched=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl)&&(typeFl==="all"||orderTypeOf(o)===typeFl));
+    const matched=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl)&&(typeFl==="all"||orderTypeOf(o)===typeFl)&&matchSource(o));
     // Also get all orders (unfiltered by search) to find siblings
     const allActive=orders;
 
@@ -2197,22 +2206,24 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
     // Sort by real order date/time desc (newest first). String sorting breaks DD/M/YYYY dates.
     result.sort((a,b)=>(parseLocaleDateMs(b.primary.created)||0)-(parseLocaleDateMs(a.primary.created)||0));
     return result;
-  },[orders,q,fl,typeFl]);
+  },[orders,q,fl,typeFl,sourceFl]);
 
   const toggleGroup=gid=>setExpandedGroups(p=>{const n=new Set(p);n.has(gid)?n.delete(gid):n.add(gid);return n;});
   const todayKeyNow=todayKey();
   const isTodayOrder=o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===todayKeyNow;};
-  const todayOrders=orders.filter(isTodayOrder);
+  // Summary tiles reflect whichever tab is active (All Orders = Office+Factory, Factory Orders = Factory-only)
+  const sourceOrders=useMemo(()=>orders.filter(matchSource),[orders,sourceFl]);
+  const todayOrders=sourceOrders.filter(isTodayOrder);
   // Today's Revenue = Cash + UPI + Other Payments received today (excludes Design Revenue), same definition as the Dashboard — payments received today only, each counted once.
-  const todayDeliveredOL=orders.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===todayKeyNow;});
+  const todayDeliveredOL=sourceOrders.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===todayKeyNow;});
   const todayAdvOrdersOL=todayOrders.filter(o=>Number(o.advance)>0);
   const todayRevenue=todayDeliveredOL.reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrdersOL.reduce((a,o)=>a+Number(o.advance||0),0);
   const summary=[
     ["Today's Orders",todayOrders.length,"ti-calendar-plus","#0f766e"],
-    ["Pending",orders.filter(o=>o.status===S.PEND).length,"ti-clock-pause","#dc2626"],
-    ["Production",orders.filter(o=>o.status===S.PROD).length,"ti-tool","#f97316"],
-    ["Ready",orders.filter(o=>o.status===S.RECV||o.status===S.TRANSIT).length,"ti-package","#2563eb"],
-    ["Delivered",orders.filter(o=>o.status===S.DELI).length,"ti-circle-check","#16a34a"],
+    ["Pending",sourceOrders.filter(o=>o.status===S.PEND).length,"ti-clock-pause","#dc2626"],
+    ["Production",sourceOrders.filter(o=>o.status===S.PROD).length,"ti-tool","#f97316"],
+    ["Ready",sourceOrders.filter(o=>o.status===S.RECV||o.status===S.TRANSIT).length,"ti-package","#2563eb"],
+    ["Delivered",sourceOrders.filter(o=>o.status===S.DELI).length,"ti-circle-check","#16a34a"],
     ["Today's Revenue",fmtM(todayRevenue),"ti-currency-rupee","#111827"],
   ];
   const premiumStatus=o=>{
@@ -2413,10 +2424,18 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
       <div className="orders-shell" style={{background:"#fff",border:"1px solid #edf0f4",borderRadius:16,padding:18,boxShadow:"0 16px 42px rgba(15,23,42,.07)",marginBottom:16}}>
         <div className="orders-header" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:16,flexWrap:"wrap",marginBottom:16}}>
           <div>
-            <div style={{fontSize:22,fontWeight:900,color:"#0f172a",letterSpacing:0}}>All Orders</div>
+            <div style={{fontSize:22,fontWeight:900,color:"#0f172a",letterSpacing:0}}>{sourceFl==="Factory"?"Factory Orders":"All Orders"}</div>
             <div style={{fontSize:12,color:"#94a3b8",marginTop:3}}>{new Date().toLocaleDateString("en-IN",{weekday:"long",year:"numeric",month:"long",day:"numeric"})}</div>
           </div>
           <div className="orders-toolbar" style={{display:"flex",gap:10,flexWrap:"wrap",alignItems:"center",flex:1,justifyContent:"flex-end"}}>
+            <div className="orders-source-tabs" style={{display:"flex",gap:4,background:"#f1f5f9",border:"1px solid #e5e7eb",borderRadius:14,padding:4,height:44,alignItems:"center",flexShrink:0}}>
+              <button type="button" className="orders-source-tab" style={{height:36,padding:"0 14px",borderRadius:10,border:"none",cursor:"pointer",fontSize:12.5,fontWeight:800,display:"flex",alignItems:"center",gap:6,background:sourceFl==="all"?"#fff":"transparent",color:sourceFl==="all"?"#0f172a":"#64748b",boxShadow:sourceFl==="all"?"0 2px 6px rgba(15,23,42,.12)":"none"}} onClick={()=>setSourceFl("all")}>
+                <i className="ti ti-list"/>All Orders
+              </button>
+              <button type="button" className="orders-source-tab" style={{height:36,padding:"0 14px",borderRadius:10,border:"none",cursor:"pointer",fontSize:12.5,fontWeight:800,display:"flex",alignItems:"center",gap:6,background:sourceFl==="Factory"?"#fff":"transparent",color:sourceFl==="Factory"?"#854f0b":"#64748b",boxShadow:sourceFl==="Factory"?"0 2px 6px rgba(15,23,42,.12)":"none"}} onClick={()=>setSourceFl("Factory")}>
+                <i className="ti ti-tool"/>Factory Orders
+              </button>
+            </div>
             <div className="orders-search" style={{position:"relative",flex:"1 1 330px",maxWidth:520}}>
               <i className="ti ti-search" style={{position:"absolute",left:13,top:"50%",transform:"translateY(-50%)",color:"#94a3b8",fontSize:15}}/>
               <input className="inp" style={{paddingLeft:38,borderRadius:14,borderColor:"#e5e7eb",background:"#fbfcfe",height:44}} value={q} onChange={e=>setQ(e.target.value)} placeholder="Search customer, mobile, order #, ID, size, wood, design..."/>
@@ -2462,7 +2481,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
         </div>
       )}
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
-        {groupedFiltered.length===0&&<div style={{textAlign:"center",padding:48,color:"#94a3b8",background:"#fff",borderRadius:16,border:"1px solid #edf0f4",boxShadow:"0 12px 30px rgba(15,23,42,.05)"}}>No orders found</div>}
+        {groupedFiltered.length===0&&<div style={{textAlign:"center",padding:48,color:"#94a3b8",background:"#fff",borderRadius:16,border:"1px solid #edf0f4",boxShadow:"0 12px 30px rgba(15,23,42,.05)"}}>{sourceFl==="Factory"?"No Factory orders found":"No orders found"}</div>}
         {groupedFiltered.map(({primary:o,subs})=>{
           const gid=o.groupId||o.id;
           const hasMulti=subs.length>0;
@@ -2585,6 +2604,8 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
         @media(max-width:920px){
           .orders-header{align-items:flex-start!important}
           .orders-toolbar{width:100%;justify-content:flex-start!important}
+          .orders-source-tabs{width:100%!important}
+          .orders-source-tab{flex:1;justify-content:center!important}
           .orders-search{max-width:none!important;flex-basis:100%!important}
           .orders-filter,.orders-select-btn{flex:1 1 180px;width:100%!important}
         }
