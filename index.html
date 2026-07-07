@@ -102,7 +102,7 @@ if(ONESIGNAL_READY){
     // service worker — see the manual setup notes for the one line to add to it.
     await OneSignal.init({
       appId:ONESIGNAL_APP_ID,
-      serviceWorkerParam:{scope:"/"},
+      serviceWorkerParam:{scope:"/hanuman-saw-mill/"},
       serviceWorkerPath:"service-worker.js"
     });
   });
