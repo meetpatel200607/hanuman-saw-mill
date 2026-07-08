@@ -622,6 +622,11 @@ function App(){
   const [page,setPage]=useState("dashboard");
   const [orders,setOrders]=useState([]);
   const [wholesaleCustomers,setWholesaleCustomers]=useState([]);
+  // Persistent order-number counters — tracks the highest order number ever issued per source
+  // (Office/Factory), independent of whether the order still exists. Needed because Delivered & Paid
+  // orders auto-purge after 15 days (and Trash after 30), which would otherwise make the "suggested
+  // next number" drift backwards once older orders are purged from the live orders collection.
+  const [orderCounters,setOrderCounters]=useState({Office:0,Factory:0});
   const [pendingOrderId,setPendingOrderId]=useState(null); // set when a wholesale party's order should open in the existing Order Details page
   const [toast,setToast]=useState(null);
   const [menuOpen,setMenuOpen]=useState(false);
@@ -719,6 +724,32 @@ function App(){
     return()=>unsub();
   },[user]);
 
+  useEffect(()=>{
+    if(!window.db||!user)return;
+    const unsub=window.db.collection("meta").doc("orderCounters").onSnapshot(doc=>{
+      if(doc.exists) setOrderCounters(p=>({...p,...doc.data()}));
+    },err=>console.error(err));
+    return()=>unsub();
+  },[user]);
+
+  // Bumps the persistent counter for a source (Office/Factory) if the given number is higher than
+  // what's stored — this is what keeps "suggested next number" correct even after old orders purge.
+  const bumpOrderCounter=async(source,num)=>{
+    if(!num) return;
+    if(window.db){
+      try{
+        await window.db.runTransaction(async tx=>{
+          const ref=window.db.collection("meta").doc("orderCounters");
+          const snap=await tx.get(ref);
+          const cur=snap.exists?Number(snap.data()[source]||0):0;
+          if(num>cur) tx.set(ref,{[source]:num},{merge:true});
+        });
+      }catch(e){console.error("Counter update failed",e);}
+    }else{
+      setOrderCounters(p=>({...p,[source]:Math.max(p[source]||0,num)}));
+    }
+  };
+
   const addWholesaleCustomer=async c=>{
     const rec={...c,id:c.id||genId(),createdAt:now2(),createdBy:user.name,active:true};
     if(window.db){try{await window.db.collection("wholesaleCustomers").doc(rec.id).set(rec);toast2("Wholesale customer saved!");}catch(e){toast2("Save failed: "+e.message,"err");}}
@@ -760,6 +791,7 @@ function App(){
       try{await window.db.collection("orders").doc(o.id).set({...orderWithHistory,createdTs:firebase.firestore.FieldValue.serverTimestamp()});toast2("Order saved to cloud!");}
       catch(e){toast2("Save failed: "+e.message,"err");}
     }else{setOrders(p=>[orderWithHistory,...p]);toast2("Order created (local only)");}
+    if(o.orderNum) bumpOrderCounter(dept,o.orderNum);
     // Office-created orders need Factory to accept them — ping Factory Staff devices.
     // Orders created directly at the Factory don't need this (Factory already knows).
     if(dept==="Office") notifyFactoryOfNewOrder(orderWithHistory);
@@ -906,11 +938,11 @@ function App(){
         )}
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
-          {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office" wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer}/>}
+          {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office" wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer} orderCounters={orderCounters}/>}
           {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user} initialOrderId={pendingOrderId} onConsumeInitialOrder={()=>setPendingOrderId(null)}/>}
-          {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
+          {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto} orderCounters={orderCounters}/>}
           {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2} user={user}/>}
-          {page==="wholesale"&&<Wholesale orders={activeOrders} allOrders={orders} wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer} updWholesaleCustomer={updWholesaleCustomer} delWholesaleCustomer={delWholesaleCustomer} addOrder={addOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2} openOrder={openOrderInList}/>}
+          {page==="wholesale"&&<Wholesale orders={activeOrders} allOrders={orders} wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer} updWholesaleCustomer={updWholesaleCustomer} delWholesaleCustomer={delWholesaleCustomer} addOrder={addOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2} openOrder={openOrderInList} orderCounters={orderCounters}/>}
           {page==="receive"&&<Receive orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="deliver"&&<Deliver orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={activeOrders}/>}
@@ -1453,7 +1485,7 @@ const LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBotto
 const emptyItem=()=>({product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",total:"",advance:"",advPayMethod:"Cash",notes:"",needsDesign:false,designType:"",designCost:"",oilPolish:false});
 const DRAFT_KEY="hsm_order_draft_v1";
 
-function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderType,presetCustomer,wholesaleCustomerId,onDone,wholesaleCustomers,addWholesaleCustomer}){
+function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderType,presetCustomer,wholesaleCustomerId,onDone,wholesaleCustomers,addWholesaleCustomer,orderCounters}){
   const orderSource=defaultSource||(user.role==="Factory Staff"?"Factory":"Office");
   const numberSource=allOrders||orders;
   // Each source (Office / Factory) has its own independent sequential numbering series —
@@ -1461,7 +1493,11 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
   // at orders from the same source, otherwise a busy Office series would push Factory's
   // suggested number far ahead (and vice versa).
   const usedNums=numberSource.filter(o=>orderSourceOf(o)===orderSource).map(o=>o.orderNum).filter(Boolean);
-  const suggestNum=usedNums.length>0?Math.max(...usedNums)+1:1;
+  // Floor against the persistent counter too — Delivered & Paid orders auto-purge after 15 days,
+  // which would otherwise erase the record of numbers already used and make the suggestion drift
+  // backwards. The counter remembers the true highest number ever issued for this source.
+  const counterFloor=(orderCounters&&orderCounters[orderSource])||0;
+  const suggestNum=Math.max(usedNums.length>0?Math.max(...usedNums):0,counterFloor)+1;
 
   // ── Order Type ── When orderType is passed in explicitly (the "New Wholesale Order" flow launched
   // from a party's own profile page) the type is locked to that value and no selector is shown, since the
@@ -1556,7 +1592,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
   const onPartyQueryChange=v=>{
     setPartyQuery(v);
     setWsCustId(null);
-    setCustomer("");setMobile("");
+    setCustomer(v);
     setShowPartySugg(v.trim().length>0);
   };
   const pickParty=c=>{
@@ -1614,10 +1650,30 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
     }
   };
 
-  const sub=e=>{
+  const sub=async e=>{
     e.preventDefault();
-    if(isWholesaleFlow&&!orderTypeLocked&&!wsCustId){toast2("Search and select a wholesale party, or create a new one","err");return;}
-    if(!customer||!mobile){toast2(isWholesaleFlow?"Select a wholesale party":"Enter customer name and mobile","err");return;}
+    // ── Auto-link or auto-create the wholesale party — no separate manual step required. ──
+    // If the typed name/mobile matches an existing party, link to it (so repeat orders for
+    // "Jagdish Ply" always land under the same party instead of creating duplicates). Otherwise
+    // create the party automatically from what was typed here.
+    let resolvedWsCustId=orderTypeLocked?wholesaleCustomerId:wsCustId;
+    if(isWholesaleFlow&&!orderTypeLocked&&!resolvedWsCustId){
+      const nameToUse=customer.trim()||partyQuery.trim();
+      if(!nameToUse){toast2("Enter the wholesale party name","err");return;}
+      if(!mobile.trim()){toast2("Enter a mobile number for this wholesale party","err");return;}
+      const norm=s=>String(s||"").trim().toLowerCase();
+      const match=wsList.find(c=>mobile.trim()&&norm(c.mobile)===norm(mobile))||wsList.find(c=>norm(c.firmName)===norm(nameToUse));
+      if(match){
+        resolvedWsCustId=match.id;
+      }else if(addWholesaleCustomer){
+        const rec=await addWholesaleCustomer({firmName:nameToUse,mobile:mobile.trim()});
+        if(!rec){toast2("Could not create wholesale party — try again","err");return;}
+        resolvedWsCustId=rec.id;
+        toast2(`${nameToUse} added to Wholesale`);
+      }
+    }
+    const finalCustomer=isWholesaleFlow&&!orderTypeLocked?(customer.trim()||partyQuery.trim()):customer;
+    if(!finalCustomer||!mobile){toast2(isWholesaleFlow?"Enter wholesale party name and mobile":"Enter customer name and mobile","err");return;}
     if(!deliveryCollectionLocation){toast2("Select Delivery Collection Location","err");return;}
     const num=parseInt(orderNumInput)||suggestNum;
     if(orderNumberTaken(num,orderSource,numberSource)){toast2("Order number "+fmtONForSource(num,orderSource)+" already exists!","err");return;}
@@ -1632,7 +1688,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
       const designTypeFull=it.needsDesign?(it.designType&&it.oilPolish?`${it.designType} + Oil Polish`:it.designType||( it.oilPolish?"Oil Polish":"")):"";
       created.push({
         id:genId(),orderNum:num,orderSuffix:orderSuffixForIndex(i),
-        customer,mobile,delivery,deliveryCollectionLocation,
+        customer:finalCustomer,mobile,delivery,deliveryCollectionLocation,
         product:it.product,wood:it.wood,size,qty:Number(it.qty),
         productTotal,total,advance:Number(it.advance)||0,
         pending:Math.max(0,total-(Number(it.advance)||0)),
@@ -1644,7 +1700,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
         payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",
         acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",
         feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:"",
-        orderType:effectiveOrderType||"Retail",wholesaleCustomerId:(orderTypeLocked?wholesaleCustomerId:wsCustId)||null,
+        orderType:effectiveOrderType||"Retail",wholesaleCustomerId:(orderTypeLocked?wholesaleCustomerId:resolvedWsCustId)||null,
       });
     }
     const groupId=created[0].id;
@@ -1765,9 +1821,13 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
                         </div>
                       )}
                       {partyQuery.trim().length>0&&(
-                        <div style={{marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-                          <span style={{fontSize:11.5,color:"#999"}}>{partyMatches.length===0?`No party found matching "${partyQuery}"`:"Don't see the right party?"}</span>
-                          {addWholesaleCustomer&&<button type="button" className="btn btn-outline" style={{padding:"5px 10px",fontSize:11.5}} onClick={()=>setShowAddParty(true)}><i className="ti ti-plus"/>Create New Party</button>}
+                        <div style={{marginTop:10}}>
+                          <label style={LBL}>Mobile Number</label>
+                          <input className="inp" value={mobile} onChange={e=>setMobile(e.target.value)} placeholder="10-digit mobile"/>
+                          <div style={{marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                            <span style={{fontSize:11.5,color:"#999"}}>{partyMatches.length===0?`No existing party matches "${partyQuery}" — it'll be added to Wholesale automatically when you submit this order.`:"Don't see the right party above?"}</span>
+                            {addWholesaleCustomer&&<button type="button" className="btn btn-outline" style={{padding:"5px 10px",fontSize:11.5}} onClick={()=>setShowAddParty(true)}><i className="ti ti-plus"/>Add Full Details</button>}
+                          </div>
                         </div>
                       )}
                     </>
@@ -1945,7 +2005,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
           </button>
         </form>
       </div>
-      {showAddParty&&<WholesaleCustomerModal initial={{firmName:partyQuery}} onSave={saveNewParty} onCancel={()=>setShowAddParty(false)}/>}
+      {showAddParty&&<WholesaleCustomerModal initial={{firmName:partyQuery,mobile}} onSave={saveNewParty} onCancel={()=>setShowAddParty(false)}/>}
     </div>
   );
 }
@@ -2681,7 +2741,7 @@ function DispatchModal({order,orders,onConfirm,onCancel,toast2}){
 }
 
 // ── FACTORY ──
-function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2,goto}){
+function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2,goto,orderCounters}){
   // Office-placed orders still go through the full factory production workflow (Accept → Production → Dispatch).
   // Factory-sourced orders bypass that workflow entirely — they only support Delivered & Paid.
   const pendAccept=orders.filter(o=>!isFactoryOrder(o)&&o.status===S.PEND);
@@ -2742,7 +2802,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
   if(showNewOrder) return(
     <div>
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setShowNewOrder(false)}>← Back to Factory View</button>
-      <NewOrder user={user} onAdd={onAdd} toast2={toast2} orders={orders} allOrders={allOrders||orders} goto={goto||(()=>setShowNewOrder(false))} defaultSource="Factory"/>
+      <NewOrder user={user} onAdd={onAdd} toast2={toast2} orders={orders} allOrders={allOrders||orders} goto={goto||(()=>setShowNewOrder(false))} defaultSource="Factory" orderCounters={orderCounters}/>
     </div>
   );
 
@@ -3624,7 +3684,7 @@ function WholesaleCustomerCard({c,orders,onClick}){
   );
 }
 
-function WholesaleCustomerProfile({customer,orders,allOrders,updOrder,updOrderH,user,toast2,addOrder,onBack,onEdit,onArchive,openOrder}){
+function WholesaleCustomerProfile({customer,orders,allOrders,updOrder,updOrderH,user,toast2,addOrder,onBack,onEdit,onArchive,openOrder,orderCounters}){
   const canManage=["Admin","Office Staff"].includes(user.role);
   const [tab,setTab]=useState("orders");
   const [creating,setCreating]=useState(false);
@@ -3649,7 +3709,7 @@ function WholesaleCustomerProfile({customer,orders,allOrders,updOrder,updOrderH,
       <button className="btn btn-outline" style={{marginBottom:16}} onClick={()=>setCreating(false)}><i className="ti ti-arrow-left"/>Back to {customer.firmName}</button>
       <NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={allOrders} allOrders={allOrders} defaultSource="Office"
         orderType="Wholesale" presetCustomer={{name:customer.firmName,mobile:customer.mobile}} wholesaleCustomerId={customer.id}
-        goto={()=>{}} onDone={()=>{}}/>
+        goto={()=>{}} onDone={()=>{}} orderCounters={orderCounters}/>
     </div>
   );
 
@@ -3742,7 +3802,7 @@ function WholesaleCustomerProfile({customer,orders,allOrders,updOrder,updOrderH,
   );
 }
 
-function Wholesale({orders,allOrders,wholesaleCustomers,addWholesaleCustomer,updWholesaleCustomer,delWholesaleCustomer,addOrder,updOrder,updOrderH,user,toast2,openOrder}){
+function Wholesale({orders,allOrders,wholesaleCustomers,addWholesaleCustomer,updWholesaleCustomer,delWholesaleCustomer,addOrder,updOrder,updOrderH,user,toast2,openOrder,orderCounters}){
   const canManage=["Admin","Office Staff"].includes(user.role);
   const [selectedId,setSelectedId]=useState(null);
   const [q,setQ]=useState("");
@@ -3781,7 +3841,7 @@ function Wholesale({orders,allOrders,wholesaleCustomers,addWholesaleCustomer,upd
       <>
         <WholesaleCustomerProfile customer={selectedCustomer} orders={orders} allOrders={allOrders} updOrder={updOrder} updOrderH={updOrderH}
           user={user} toast2={toast2} addOrder={addOrder} onBack={()=>setSelectedId(null)} onEdit={()=>setModal(selectedCustomer)}
-          onArchive={()=>setArchiveTarget(selectedCustomer)} openOrder={openOrder}/>
+          onArchive={()=>setArchiveTarget(selectedCustomer)} openOrder={openOrder} orderCounters={orderCounters}/>
         {modal&&<WholesaleCustomerModal initial={modal==="add"?null:modal} onSave={saveCustomer} onCancel={()=>setModal(null)}/>}
         {archiveTarget&&(
           <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setArchiveTarget(null)}>
