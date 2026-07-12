@@ -591,6 +591,12 @@ function Login({onLogin}){
         setBusy(false);
         return;
       }
+      if(doc.data().active===false){
+        setErr("This account has been disabled. Contact your Admin.");
+        await window.auth.signOut();
+        setBusy(false);
+        return;
+      }
       onLogin({uid:cred.user.uid,...doc.data()});
     }catch(e){
       setErr("Invalid username or password");
@@ -622,11 +628,6 @@ function App(){
   const [page,setPage]=useState("dashboard");
   const [orders,setOrders]=useState([]);
   const [wholesaleCustomers,setWholesaleCustomers]=useState([]);
-  // Persistent order-number counters — tracks the highest order number ever issued per source
-  // (Office/Factory), independent of whether the order still exists. Needed because Delivered & Paid
-  // orders auto-purge after 15 days (and Trash after 30), which would otherwise make the "suggested
-  // next number" drift backwards once older orders are purged from the live orders collection.
-  const [orderCounters,setOrderCounters]=useState({Office:0,Factory:0});
   const [pendingOrderId,setPendingOrderId]=useState(null); // set when a wholesale party's order should open in the existing Order Details page
   const [toast,setToast]=useState(null);
   const [menuOpen,setMenuOpen]=useState(false);
@@ -641,7 +642,8 @@ function App(){
       if(!fbUser){setUser(null);setAuthChecked(true);return;}
       try{
         const doc=await window.db.collection("users").doc(fbUser.uid).get();
-        if(doc.exists) setUser({uid:fbUser.uid,...doc.data()});
+        if(doc.exists&&doc.data().active===false){await window.auth.signOut();setUser(null);}
+        else if(doc.exists) setUser({uid:fbUser.uid,...doc.data()});
         else{await window.auth.signOut();setUser(null);}
       }catch(e){setUser(null);}
       setAuthChecked(true);
@@ -724,32 +726,6 @@ function App(){
     return()=>unsub();
   },[user]);
 
-  useEffect(()=>{
-    if(!window.db||!user)return;
-    const unsub=window.db.collection("meta").doc("orderCounters").onSnapshot(doc=>{
-      if(doc.exists) setOrderCounters(p=>({...p,...doc.data()}));
-    },err=>console.error(err));
-    return()=>unsub();
-  },[user]);
-
-  // Bumps the persistent counter for a source (Office/Factory) if the given number is higher than
-  // what's stored — this is what keeps "suggested next number" correct even after old orders purge.
-  const bumpOrderCounter=async(source,num)=>{
-    if(!num) return;
-    if(window.db){
-      try{
-        await window.db.runTransaction(async tx=>{
-          const ref=window.db.collection("meta").doc("orderCounters");
-          const snap=await tx.get(ref);
-          const cur=snap.exists?Number(snap.data()[source]||0):0;
-          if(num>cur) tx.set(ref,{[source]:num},{merge:true});
-        });
-      }catch(e){console.error("Counter update failed",e);}
-    }else{
-      setOrderCounters(p=>({...p,[source]:Math.max(p[source]||0,num)}));
-    }
-  };
-
   const addWholesaleCustomer=async c=>{
     const rec={...c,id:c.id||genId(),createdAt:now2(),createdBy:user.name,active:true};
     if(window.db){try{await window.db.collection("wholesaleCustomers").doc(rec.id).set(rec);toast2("Wholesale customer saved!");}catch(e){toast2("Save failed: "+e.message,"err");}}
@@ -791,7 +767,6 @@ function App(){
       try{await window.db.collection("orders").doc(o.id).set({...orderWithHistory,createdTs:firebase.firestore.FieldValue.serverTimestamp()});toast2("Order saved to cloud!");}
       catch(e){toast2("Save failed: "+e.message,"err");}
     }else{setOrders(p=>[orderWithHistory,...p]);toast2("Order created (local only)");}
-    if(o.orderNum) bumpOrderCounter(dept,o.orderNum);
     // Office-created orders need Factory to accept them — ping Factory Staff devices.
     // Orders created directly at the Factory don't need this (Factory already knows).
     if(dept==="Office") notifyFactoryOfNewOrder(orderWithHistory);
@@ -872,6 +847,7 @@ function App(){
     {id:"receive",icon:"ti-qrcode",label:"Receive / Scan",roles:["Admin","Office Staff"]},
     {id:"deliver",icon:"ti-truck-delivery",label:"Deliver & Pay",roles:["Admin","Office Staff"]},
     {id:"reports",icon:"ti-report",label:"Reports",roles:["Admin","Accountant"]},
+    {id:"staff",icon:"ti-users",label:"Staff Accounts",roles:["Admin"]},
     {id:"trash",icon:"ti-trash",label:"Trash",roles:["Admin"]},
   ].filter(n=>n.roles.includes("all")||n.roles.includes(user.role));
 
@@ -938,14 +914,15 @@ function App(){
         )}
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
-          {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office" wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer} orderCounters={orderCounters}/>}
+          {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office" wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer}/>}
           {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user} initialOrderId={pendingOrderId} onConsumeInitialOrder={()=>setPendingOrderId(null)}/>}
-          {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto} orderCounters={orderCounters}/>}
+          {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
           {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2} user={user}/>}
-          {page==="wholesale"&&<Wholesale orders={activeOrders} allOrders={orders} wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer} updWholesaleCustomer={updWholesaleCustomer} delWholesaleCustomer={delWholesaleCustomer} addOrder={addOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2} openOrder={openOrderInList} orderCounters={orderCounters}/>}
+          {page==="wholesale"&&<Wholesale orders={activeOrders} allOrders={orders} wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer} updWholesaleCustomer={updWholesaleCustomer} delWholesaleCustomer={delWholesaleCustomer} addOrder={addOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2} openOrder={openOrderInList}/>}
           {page==="receive"&&<Receive orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="deliver"&&<Deliver orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={activeOrders}/>}
+          {page==="staff"&&user.role==="Admin"&&<StaffAccounts user={user} toast2={toast2}/>}
           {page==="trash"&&user.role==="Admin"&&<Trash orders={trashedOrders} allOrders={orders} restoreOrder={restoreOrder} permanentDeleteOrder={permanentDeleteOrder} toast2={toast2}/>}
         </main>
       </div>
@@ -1241,6 +1218,157 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
   );
 }
 
+// ── STAFF ACCOUNTS (Admin only) ──
+// Lets Admin add new staff logins and enable/disable existing ones, without touching Firebase Console.
+// New accounts are created through a throwaway secondary Firebase app instance so the Admin's own
+// session isn't disturbed (Firebase Auth normally signs you in as whichever user you just created).
+// "Remove" here means disable login (active:false) — it does not delete the underlying Firebase Auth
+// account, since that requires Admin SDK access we don't have from the browser.
+function StaffAccountModal({onSave,onCancel}){
+  const [name,setName]=useState("");
+  const [username,setUsername]=useState("");
+  const [password,setPassword]=useState("");
+  const [role,setRole]=useState("Office Staff");
+  const [err,setErr]=useState("");
+  const [busy,setBusy]=useState(false);
+  const submit=async e=>{
+    e.preventDefault();
+    setErr("");
+    if(!name.trim()||!username.trim()||!password){setErr("Fill in all fields");return;}
+    if(password.length<6){setErr("Password must be at least 6 characters");return;}
+    setBusy(true);
+    const res=await onSave({name:name.trim(),username:username.trim().toLowerCase().replace(/\s+/g,""),password,role});
+    setBusy(false);
+    if(res&&res.error) setErr(res.error);
+  };
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onCancel}>
+      <div className="card" style={{maxWidth:400,width:"100%"}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontWeight:700,fontSize:15,marginBottom:14}}>Add Staff Account</div>
+        <form onSubmit={submit} style={{display:"flex",flexDirection:"column",gap:12}}>
+          <div><label style={{fontSize:11,fontWeight:600,color:"#888",display:"block",marginBottom:4}}>Full Name *</label><input className="inp" value={name} onChange={e=>setName(e.target.value)} placeholder="e.g. Suresh Kumar" autoFocus disabled={busy}/></div>
+          <div><label style={{fontSize:11,fontWeight:600,color:"#888",display:"block",marginBottom:4}}>Username *</label><input className="inp" value={username} onChange={e=>setUsername(e.target.value)} placeholder="e.g. suresh" disabled={busy}/></div>
+          <div><label style={{fontSize:11,fontWeight:600,color:"#888",display:"block",marginBottom:4}}>Temporary Password *</label><input className="inp" type="text" value={password} onChange={e=>setPassword(e.target.value)} placeholder="At least 6 characters" disabled={busy}/></div>
+          <div><label style={{fontSize:11,fontWeight:600,color:"#888",display:"block",marginBottom:4}}>Role *</label>
+            <select className="inp" value={role} onChange={e=>setRole(e.target.value)} disabled={busy}>{ROLES.map(r=><option key={r}>{r}</option>)}</select>
+          </div>
+          {err&&<div style={{color:"#cc0000",fontSize:12,fontWeight:600}}>{err}</div>}
+          <div style={{display:"flex",gap:8,justifyContent:"flex-end",marginTop:4}}>
+            <button type="button" className="btn btn-outline" onClick={onCancel} disabled={busy}>Cancel</button>
+            <button type="submit" className="btn btn-red" disabled={busy}>{busy?"Creating...":"Create Account"}</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+function StaffAccounts({user,toast2}){
+  const [staff,setStaff]=useState([]);
+  const [loading,setLoading]=useState(true);
+  const [showAdd,setShowAdd]=useState(false);
+  const [toggleTarget,setToggleTarget]=useState(null);
+
+  useEffect(()=>{
+    if(!window.db) return;
+    const unsub=window.db.collection("users").onSnapshot(snap=>{
+      setStaff(snap.docs.map(d=>({uid:d.id,...d.data()})).sort((a,b)=>(a.name||"").localeCompare(b.name||"")));
+      setLoading(false);
+    },err=>{console.error(err);setLoading(false);toast2("Couldn't load staff list — check Firestore rules for the users collection","err");});
+    return()=>unsub();
+  },[]);
+
+  const createStaff=async({name,username,password,role})=>{
+    const email=usernameToEmail(username);
+    const secondaryApp=firebase.initializeApp(FIREBASE_CONFIG,"Secondary-"+Date.now());
+    try{
+      const cred=await secondaryApp.auth().createUserWithEmailAndPassword(email,password);
+      const uid=cred.user.uid;
+      await secondaryApp.auth().signOut();
+      await window.db.collection("users").doc(uid).set({name,role,username,active:true,createdAt:now2(),createdBy:user.name});
+      toast2(name+" added — they can log in with username \""+username+"\"");
+      setShowAdd(false);
+      return {ok:true};
+    }catch(e){
+      let msg=e.message||"Couldn't create account";
+      if(e.code==="auth/email-already-in-use") msg="That username is already taken";
+      if(e.code==="auth/weak-password") msg="Password must be at least 6 characters";
+      return {error:msg};
+    }finally{
+      secondaryApp.delete().catch(()=>{});
+    }
+  };
+
+  const toggleActive=async s=>{
+    if(s.uid===user.uid){toast2("You can't disable your own account","err");return;}
+    const nextActive=s.active===false?true:false;
+    try{
+      await window.db.collection("users").doc(s.uid).update({active:nextActive});
+      toast2(nextActive?s.name+" re-enabled":s.name+" disabled — they can no longer log in");
+    }catch(e){toast2("Update failed — check Firestore rules for the users collection","err");}
+    setToggleTarget(null);
+  };
+
+  if(!window.db) return <div className="card" style={{textAlign:"center",padding:30,color:"#bbb"}}>Staff accounts need Cloud Sync (Firebase) to be configured.</div>;
+
+  return(
+    <div style={{maxWidth:700,margin:"0 auto"}}>
+      <div style={{display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,marginBottom:16}}>
+        <div>
+          <div style={{fontWeight:700,fontSize:16}}>Staff Accounts</div>
+          <div style={{fontSize:12,color:"#999",marginTop:2}}>{staff.length} account{staff.length===1?"":"s"} · add or disable logins without touching Firebase Console</div>
+        </div>
+        <button className="btn btn-red" onClick={()=>setShowAdd(true)}><i className="ti ti-user-plus"/>Add Staff</button>
+      </div>
+
+      {loading&&<div style={{textAlign:"center",padding:30,color:"#bbb"}}>Loading...</div>}
+      {!loading&&staff.length===0&&<div className="card" style={{textAlign:"center",padding:30,color:"#bbb"}}>No staff accounts found. This can also mean Firestore rules don't allow reading the full users list yet — check the rules for the "users" collection.</div>}
+
+      <div style={{display:"flex",flexDirection:"column",gap:9}}>
+        {staff.map(s=>{
+          const disabled=s.active===false;
+          const isMe=s.uid===user.uid;
+          return(
+            <div key={s.uid} className="card" style={{display:"flex",alignItems:"center",gap:12,padding:"12px 14px",flexWrap:"wrap",opacity:disabled?.6:1}}>
+              <div style={{width:40,height:40,borderRadius:"50%",background:disabled?"#f0ede8":"#fff3f3",display:"flex",alignItems:"center",justifyContent:"center",flexShrink:0}}>
+                <span style={{fontWeight:700,color:disabled?"#999":"#cc0000",fontSize:14}}>{(s.name||"?")[0].toUpperCase()}</span>
+              </div>
+              <div style={{flex:1,minWidth:0}}>
+                <div style={{display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+                  <span style={{fontWeight:700,fontSize:14}}>{s.name||"—"}</span>
+                  {isMe&&<span style={{fontSize:10.5,color:"#999",background:"#f5f5f3",borderRadius:6,padding:"1px 7px"}}>You</span>}
+                  {disabled&&<span style={{fontSize:10.5,color:"#cc0000",background:"#fff0f0",borderRadius:6,padding:"1px 7px",fontWeight:700}}>Disabled</span>}
+                </div>
+                <div style={{fontSize:11.5,color:"#999",marginTop:2}}>{s.role||"—"}{s.username?` · ${s.username}`:""}</div>
+              </div>
+              {!isMe&&<button className={disabled?"btn btn-green":"btn btn-danger"} style={{padding:"7px 12px",fontSize:12}} onClick={()=>setToggleTarget(s)}>
+                <i className={`ti ${disabled?"ti-check":"ti-user-off"}`}/>{disabled?"Enable":"Disable"}
+              </button>}
+            </div>
+          );
+        })}
+      </div>
+
+      {showAdd&&<StaffAccountModal onSave={createStaff} onCancel={()=>setShowAdd(false)}/>}
+
+      {toggleTarget&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setToggleTarget(null)}>
+          <div className="card" style={{maxWidth:380}} onClick={e=>e.stopPropagation()}>
+            <div style={{fontWeight:700,fontSize:15,marginBottom:8}}>{toggleTarget.active===false?"Re-enable":"Disable"} {toggleTarget.name}?</div>
+            <div style={{fontSize:12.5,color:"#888",marginBottom:16}}>
+              {toggleTarget.active===false?"They'll be able to log in again with their existing username and password.":"They won't be able to log in until you re-enable this account. Their name stays on all past orders."}
+            </div>
+            <div style={{display:"flex",gap:8,justifyContent:"flex-end"}}>
+              <button className="btn btn-outline" onClick={()=>setToggleTarget(null)}>Cancel</button>
+              <button className={toggleTarget.active===false?"btn btn-green":"btn btn-red"} onClick={()=>toggleActive(toggleTarget)}>{toggleTarget.active===false?"Enable":"Disable"}</button>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ── ORDER HISTORY HELPERS ──
 function makeHistoryEntry(action, dept, prevVal, newVal){
   const now=new Date();
@@ -1485,7 +1613,7 @@ const LBL={fontSize:11.5,fontWeight:600,color:"#777",display:"block",marginBotto
 const emptyItem=()=>({product:PRODUCTS[0],wood:"Khair",dimL:"",dimW:"",dimT:"",qty:"",total:"",advance:"",advPayMethod:"Cash",notes:"",needsDesign:false,designType:"",designCost:"",oilPolish:false});
 const DRAFT_KEY="hsm_order_draft_v1";
 
-function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderType,presetCustomer,wholesaleCustomerId,onDone,wholesaleCustomers,addWholesaleCustomer,orderCounters}){
+function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderType,presetCustomer,wholesaleCustomerId,onDone,wholesaleCustomers,addWholesaleCustomer}){
   const orderSource=defaultSource||(user.role==="Factory Staff"?"Factory":"Office");
   const numberSource=allOrders||orders;
   // Each source (Office / Factory) has its own independent sequential numbering series —
@@ -1493,11 +1621,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
   // at orders from the same source, otherwise a busy Office series would push Factory's
   // suggested number far ahead (and vice versa).
   const usedNums=numberSource.filter(o=>orderSourceOf(o)===orderSource).map(o=>o.orderNum).filter(Boolean);
-  // Floor against the persistent counter too — Delivered & Paid orders auto-purge after 15 days,
-  // which would otherwise erase the record of numbers already used and make the suggestion drift
-  // backwards. The counter remembers the true highest number ever issued for this source.
-  const counterFloor=(orderCounters&&orderCounters[orderSource])||0;
-  const suggestNum=Math.max(usedNums.length>0?Math.max(...usedNums):0,counterFloor)+1;
+  const suggestNum=usedNums.length>0?Math.max(...usedNums)+1:1;
 
   // ── Order Type ── When orderType is passed in explicitly (the "New Wholesale Order" flow launched
   // from a party's own profile page) the type is locked to that value and no selector is shown, since the
@@ -1592,7 +1716,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
   const onPartyQueryChange=v=>{
     setPartyQuery(v);
     setWsCustId(null);
-    setCustomer(v);
+    setCustomer("");setMobile("");
     setShowPartySugg(v.trim().length>0);
   };
   const pickParty=c=>{
@@ -1650,30 +1774,10 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
     }
   };
 
-  const sub=async e=>{
+  const sub=e=>{
     e.preventDefault();
-    // ── Auto-link or auto-create the wholesale party — no separate manual step required. ──
-    // If the typed name/mobile matches an existing party, link to it (so repeat orders for
-    // "Jagdish Ply" always land under the same party instead of creating duplicates). Otherwise
-    // create the party automatically from what was typed here.
-    let resolvedWsCustId=orderTypeLocked?wholesaleCustomerId:wsCustId;
-    if(isWholesaleFlow&&!orderTypeLocked&&!resolvedWsCustId){
-      const nameToUse=customer.trim()||partyQuery.trim();
-      if(!nameToUse){toast2("Enter the wholesale party name","err");return;}
-      if(!mobile.trim()){toast2("Enter a mobile number for this wholesale party","err");return;}
-      const norm=s=>String(s||"").trim().toLowerCase();
-      const match=wsList.find(c=>mobile.trim()&&norm(c.mobile)===norm(mobile))||wsList.find(c=>norm(c.firmName)===norm(nameToUse));
-      if(match){
-        resolvedWsCustId=match.id;
-      }else if(addWholesaleCustomer){
-        const rec=await addWholesaleCustomer({firmName:nameToUse,mobile:mobile.trim()});
-        if(!rec){toast2("Could not create wholesale party — try again","err");return;}
-        resolvedWsCustId=rec.id;
-        toast2(`${nameToUse} added to Wholesale`);
-      }
-    }
-    const finalCustomer=isWholesaleFlow&&!orderTypeLocked?(customer.trim()||partyQuery.trim()):customer;
-    if(!finalCustomer||!mobile){toast2(isWholesaleFlow?"Enter wholesale party name and mobile":"Enter customer name and mobile","err");return;}
+    if(isWholesaleFlow&&!orderTypeLocked&&!wsCustId){toast2("Search and select a wholesale party, or create a new one","err");return;}
+    if(!customer||!mobile){toast2(isWholesaleFlow?"Select a wholesale party":"Enter customer name and mobile","err");return;}
     if(!deliveryCollectionLocation){toast2("Select Delivery Collection Location","err");return;}
     const num=parseInt(orderNumInput)||suggestNum;
     if(orderNumberTaken(num,orderSource,numberSource)){toast2("Order number "+fmtONForSource(num,orderSource)+" already exists!","err");return;}
@@ -1688,7 +1792,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
       const designTypeFull=it.needsDesign?(it.designType&&it.oilPolish?`${it.designType} + Oil Polish`:it.designType||( it.oilPolish?"Oil Polish":"")):"";
       created.push({
         id:genId(),orderNum:num,orderSuffix:orderSuffixForIndex(i),
-        customer:finalCustomer,mobile,delivery,deliveryCollectionLocation,
+        customer,mobile,delivery,deliveryCollectionLocation,
         product:it.product,wood:it.wood,size,qty:Number(it.qty),
         productTotal,total,advance:Number(it.advance)||0,
         pending:Math.max(0,total-(Number(it.advance)||0)),
@@ -1700,7 +1804,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
         payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",
         acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",
         feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:"",
-        orderType:effectiveOrderType||"Retail",wholesaleCustomerId:(orderTypeLocked?wholesaleCustomerId:resolvedWsCustId)||null,
+        orderType:effectiveOrderType||"Retail",wholesaleCustomerId:(orderTypeLocked?wholesaleCustomerId:wsCustId)||null,
       });
     }
     const groupId=created[0].id;
@@ -1821,13 +1925,9 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
                         </div>
                       )}
                       {partyQuery.trim().length>0&&(
-                        <div style={{marginTop:10}}>
-                          <label style={LBL}>Mobile Number</label>
-                          <input className="inp" value={mobile} onChange={e=>setMobile(e.target.value)} placeholder="10-digit mobile"/>
-                          <div style={{marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
-                            <span style={{fontSize:11.5,color:"#999"}}>{partyMatches.length===0?`No existing party matches "${partyQuery}" — it'll be added to Wholesale automatically when you submit this order.`:"Don't see the right party above?"}</span>
-                            {addWholesaleCustomer&&<button type="button" className="btn btn-outline" style={{padding:"5px 10px",fontSize:11.5}} onClick={()=>setShowAddParty(true)}><i className="ti ti-plus"/>Add Full Details</button>}
-                          </div>
+                        <div style={{marginTop:8,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+                          <span style={{fontSize:11.5,color:"#999"}}>{partyMatches.length===0?`No party found matching "${partyQuery}"`:"Don't see the right party?"}</span>
+                          {addWholesaleCustomer&&<button type="button" className="btn btn-outline" style={{padding:"5px 10px",fontSize:11.5}} onClick={()=>setShowAddParty(true)}><i className="ti ti-plus"/>Create New Party</button>}
                         </div>
                       )}
                     </>
@@ -2005,7 +2105,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
           </button>
         </form>
       </div>
-      {showAddParty&&<WholesaleCustomerModal initial={{firmName:partyQuery,mobile}} onSave={saveNewParty} onCancel={()=>setShowAddParty(false)}/>}
+      {showAddParty&&<WholesaleCustomerModal initial={{firmName:partyQuery}} onSave={saveNewParty} onCancel={()=>setShowAddParty(false)}/>}
     </div>
   );
 }
@@ -2180,6 +2280,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
   const [typeFl,setTypeFl]=useState("all");
+  const [woodFl,setWoodFl]=useState("all");
   const [sourceFl,setSourceFl]=useState("all"); // "all" = Office+Factory (existing All Orders view), "Factory" = Factory Orders view only
   const [sel,setSel]=useState(null);
 
@@ -2213,15 +2314,29 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
       matchesOrderNumber(o,t,allOrders||orders);
   };
   const matchSource=o=>sourceFl==="all"||orderSourceOf(o)===sourceFl;
-  const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl)&&(typeFl==="all"||orderTypeOf(o)===typeFl)&&matchSource(o));
+  const matchWood=o=>woodFl==="all"||o.wood===woodFl;
+  const filtered=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl)&&(typeFl==="all"||orderTypeOf(o)===typeFl)&&matchSource(o)&&matchWood(o));
   const doDelete=(o)=>{setDelTarget(o);setSel(null);};
+
+  // ── Wood-type counts — lets you click straight into "all orders ever placed for Khair" etc.
+  // Handy on a call when a customer only remembers the wood, not their order number. ──
+  const woodCounts=useMemo(()=>{
+    const m={};
+    orders.forEach(o=>{if(o.wood) m[o.wood]=(m[o.wood]||0)+1;});
+    return m;
+  },[orders]);
+  const woodChipList=useMemo(()=>{
+    const known=WOODS.filter(w=>woodCounts[w]);
+    const extra=Object.keys(woodCounts).filter(w=>!WOODS.includes(w));
+    return [...known,...extra];
+  },[woodCounts]);
 
   // ── Build grouped order list ──
   // Primary = order that "owns" the group (has orderNum, or is groupId anchor)
   // Sub-items = same groupId but not the primary
   const groupedFiltered=useMemo(()=>{
     // First get all orders that match the filter/search
-    const matched=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl)&&(typeFl==="all"||orderTypeOf(o)===typeFl)&&matchSource(o));
+    const matched=orders.filter(o=>matchQ(o,q)&&(fl==="all"||o.status===fl)&&(typeFl==="all"||orderTypeOf(o)===typeFl)&&matchSource(o)&&matchWood(o));
     // Also get all orders (unfiltered by search) to find siblings
     const allActive=orders;
 
@@ -2266,7 +2381,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
     // Sort by real order date/time desc (newest first). String sorting breaks DD/M/YYYY dates.
     result.sort((a,b)=>(parseLocaleDateMs(b.primary.created)||0)-(parseLocaleDateMs(a.primary.created)||0));
     return result;
-  },[orders,q,fl,typeFl,sourceFl]);
+  },[orders,q,fl,typeFl,sourceFl,woodFl]);
 
   const toggleGroup=gid=>setExpandedGroups(p=>{const n=new Set(p);n.has(gid)?n.delete(gid):n.add(gid);return n;});
   const todayKeyNow=todayKey();
@@ -2282,7 +2397,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
     ["Today's Orders",todayOrders.length,"ti-calendar-plus","#0f766e"],
     ["Pending",sourceOrders.filter(o=>o.status===S.PEND).length,"ti-clock-pause","#dc2626"],
     ["Production",sourceOrders.filter(o=>o.status===S.PROD).length,"ti-tool","#f97316"],
-    ["In Transit",sourceOrders.filter(o=>o.status===S.RECV||o.status===S.TRANSIT).length,"ti-truck-delivery","#6a1bb5"],
+    ["Ready",sourceOrders.filter(o=>o.status===S.RECV||o.status===S.TRANSIT).length,"ti-package","#2563eb"],
     ["Delivered",sourceOrders.filter(o=>o.status===S.DELI).length,"ti-circle-check","#16a34a"],
     ["Today's Revenue",fmtM(todayRevenue),"ti-currency-rupee","#111827"],
   ];
@@ -2291,7 +2406,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
     if(/cancel/i.test(s)) return {label:"Cancelled",bg:"#f3f4f6",color:"#6b7280",border:"#e5e7eb"};
     if(s===S.PEND) return {label:"Factory Pending",bg:"#fff1f2",color:"#be123c",border:"#fecdd3"};
     if(s===S.PROD) return {label:"Production",bg:"#fff7ed",color:"#c2410c",border:"#fed7aa"};
-    if(s===S.TRANSIT||s===S.RECV) return {label:"In Transit",bg:"#f0e6fb",color:"#6a1bb5",border:"#ddc7f5"};
+    if(s===S.TRANSIT||s===S.RECV) return {label:"Ready",bg:"#eff6ff",color:"#1d4ed8",border:"#bfdbfe"};
     if(s===S.DELI&&Number(o.pending||0)<=0) return {label:"Paid",bg:"#ecfdf5",color:"#047857",border:"#a7f3d0"};
     if(s===S.DELI) return {label:"Delivered",bg:"#f0fdf4",color:"#15803d",border:"#bbf7d0"};
     return {label:s||"—",bg:"#f8fafc",color:"#475569",border:"#e2e8f0"};
@@ -2528,6 +2643,15 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
             </div>
           ))}
         </div>
+        {woodChipList.length>0&&(
+          <div style={{marginTop:12,paddingTop:12,borderTop:"1px solid #f1f5f9",display:"flex",alignItems:"center",gap:8,flexWrap:"wrap"}}>
+            <span style={{fontSize:11,color:"#94a3b8",fontWeight:700,marginRight:2}}>Wood:</span>
+            <button type="button" onClick={()=>setWoodFl("all")} style={{fontSize:11.5,fontWeight:700,padding:"4px 10px",borderRadius:999,border:`1px solid ${woodFl==="all"?"#0f172a":"#e2e8f0"}`,background:woodFl==="all"?"#0f172a":"#fff",color:woodFl==="all"?"#fff":"#64748b",cursor:"pointer"}}>All</button>
+            {woodChipList.map(w=>(
+              <button key={w} type="button" onClick={()=>setWoodFl(f=>f===w?"all":w)} style={{fontSize:11.5,fontWeight:700,padding:"4px 10px",borderRadius:999,border:`1px solid ${woodFl===w?"#166534":"#e2e8f0"}`,background:woodFl===w?"#166534":"#fff",color:woodFl===w?"#fff":"#64748b",cursor:"pointer"}}>{w} <span style={{opacity:.75}}>({woodCounts[w]})</span></button>
+            ))}
+          </div>
+        )}
       </div>
       {isAdmin&&bulkMode&&(
         <div style={{background:"#111827",borderRadius:16,padding:"13px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,boxShadow:"0 10px 28px rgba(17,24,39,.18)"}}>
@@ -2741,7 +2865,7 @@ function DispatchModal({order,orders,onConfirm,onCancel,toast2}){
 }
 
 // ── FACTORY ──
-function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2,goto,orderCounters}){
+function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2,goto}){
   // Office-placed orders still go through the full factory production workflow (Accept → Production → Dispatch).
   // Factory-sourced orders bypass that workflow entirely — they only support Delivered & Paid.
   const pendAccept=orders.filter(o=>!isFactoryOrder(o)&&o.status===S.PEND);
@@ -2802,7 +2926,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
   if(showNewOrder) return(
     <div>
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setShowNewOrder(false)}>← Back to Factory View</button>
-      <NewOrder user={user} onAdd={onAdd} toast2={toast2} orders={orders} allOrders={allOrders||orders} goto={goto||(()=>setShowNewOrder(false))} defaultSource="Factory" orderCounters={orderCounters}/>
+      <NewOrder user={user} onAdd={onAdd} toast2={toast2} orders={orders} allOrders={allOrders||orders} goto={goto||(()=>setShowNewOrder(false))} defaultSource="Factory"/>
     </div>
   );
 
@@ -3684,7 +3808,7 @@ function WholesaleCustomerCard({c,orders,onClick}){
   );
 }
 
-function WholesaleCustomerProfile({customer,orders,allOrders,updOrder,updOrderH,user,toast2,addOrder,onBack,onEdit,onArchive,openOrder,orderCounters}){
+function WholesaleCustomerProfile({customer,orders,allOrders,updOrder,updOrderH,user,toast2,addOrder,onBack,onEdit,onArchive,openOrder}){
   const canManage=["Admin","Office Staff"].includes(user.role);
   const [tab,setTab]=useState("orders");
   const [creating,setCreating]=useState(false);
@@ -3709,7 +3833,7 @@ function WholesaleCustomerProfile({customer,orders,allOrders,updOrder,updOrderH,
       <button className="btn btn-outline" style={{marginBottom:16}} onClick={()=>setCreating(false)}><i className="ti ti-arrow-left"/>Back to {customer.firmName}</button>
       <NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={allOrders} allOrders={allOrders} defaultSource="Office"
         orderType="Wholesale" presetCustomer={{name:customer.firmName,mobile:customer.mobile}} wholesaleCustomerId={customer.id}
-        goto={()=>{}} onDone={()=>{}} orderCounters={orderCounters}/>
+        goto={()=>{}} onDone={()=>{}}/>
     </div>
   );
 
@@ -3802,7 +3926,7 @@ function WholesaleCustomerProfile({customer,orders,allOrders,updOrder,updOrderH,
   );
 }
 
-function Wholesale({orders,allOrders,wholesaleCustomers,addWholesaleCustomer,updWholesaleCustomer,delWholesaleCustomer,addOrder,updOrder,updOrderH,user,toast2,openOrder,orderCounters}){
+function Wholesale({orders,allOrders,wholesaleCustomers,addWholesaleCustomer,updWholesaleCustomer,delWholesaleCustomer,addOrder,updOrder,updOrderH,user,toast2,openOrder}){
   const canManage=["Admin","Office Staff"].includes(user.role);
   const [selectedId,setSelectedId]=useState(null);
   const [q,setQ]=useState("");
@@ -3841,7 +3965,7 @@ function Wholesale({orders,allOrders,wholesaleCustomers,addWholesaleCustomer,upd
       <>
         <WholesaleCustomerProfile customer={selectedCustomer} orders={orders} allOrders={allOrders} updOrder={updOrder} updOrderH={updOrderH}
           user={user} toast2={toast2} addOrder={addOrder} onBack={()=>setSelectedId(null)} onEdit={()=>setModal(selectedCustomer)}
-          onArchive={()=>setArchiveTarget(selectedCustomer)} openOrder={openOrder} orderCounters={orderCounters}/>
+          onArchive={()=>setArchiveTarget(selectedCustomer)} openOrder={openOrder}/>
         {modal&&<WholesaleCustomerModal initial={modal==="add"?null:modal} onSave={saveCustomer} onCancel={()=>setModal(null)}/>}
         {archiveTarget&&(
           <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.45)",zIndex:300,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={()=>setArchiveTarget(null)}>
