@@ -815,6 +815,47 @@ function App(){
     }
   };
 
+  // bulkAdvanceOrders — lets Admin push a whole batch of orders through Dispatch / Receive / Deliver
+  // in one go, for when factory/office staff forgot to scan them individually over the past few days.
+  // stage: "dispatch" (Production→In Transit), "receive" (In Transit→Received at Office),
+  // "deliver" (→Delivered & Paid, extra:{payMethod,loc}).
+  const bulkAdvanceOrders=async(ids,stage,extra)=>{
+    if(user.role!=="Admin"){toast2("Only Admin can bulk update orders","err");return;}
+    const unique=[...new Set(ids)].filter(Boolean);
+    if(!unique.length)return;
+    const eligible=orders.filter(o=>unique.includes(o.id)&&!isTrashed(o)&&(
+      stage==="dispatch"?(!isFactoryOrder(o)&&o.status===S.PROD):
+      stage==="receive"?(!isFactoryOrder(o)&&o.status===S.TRANSIT):
+      stage==="deliver"?(!isFactoryOrder(o)&&o.status!==S.DELI&&o.status!==S.PEND):false
+    ));
+    const skipped=unique.length-eligible.length;
+    if(!eligible.length){toast2("No selected orders are eligible for that action","err");return;}
+    const label=stage==="dispatch"?"Dispatched (Bulk by Admin)":stage==="receive"?"Received at Office (Bulk by Admin)":"Delivered (Bulk by Admin)";
+    const buildPatch=o=>{
+      if(stage==="dispatch") return {status:S.TRANSIT,dispatchedAt:now2(),dispatchedBy:user.name};
+      if(stage==="receive") return {status:S.RECV,receivedAt:now2(),receivedBy:user.name};
+      return {status:S.DELI,pending:0,payMethod:(extra&&extra.payMethod)||"Cash",payAt:now2(),deliveredAt:now2(),deliveredBy:user.name,deliveredLocation:(extra&&extra.loc)||"At Office"};
+    };
+    if(window.db){
+      try{
+        const batch=window.db.batch();
+        eligible.forEach(o=>{
+          const h=makeHistoryEntry(label,"Admin");
+          batch.update(window.db.collection("orders").doc(o.id),{...buildPatch(o),history:firebase.firestore.FieldValue.arrayUnion(h)});
+        });
+        await batch.commit();
+      }catch(e){toast2("Bulk update failed","err");return;}
+    }else{
+      setOrders(p=>p.map(o=>{
+        const match=eligible.find(e=>e.id===o.id);
+        if(!match)return o;
+        const h=makeHistoryEntry(label,"Admin");
+        return {...o,...buildPatch(o),history:[...(o.history||[]),h]};
+      }));
+    }
+    toast2(eligible.length+" order"+(eligible.length===1?"":"s")+" marked "+(stage==="dispatch"?"In Transit":stage==="receive"?"Received":"Delivered & Paid")+(skipped?` (${skipped} skipped — wrong status)`:""));
+  };
+
   const restoreOrder=async id=>{
     const patch={deleted:false,restoredAt:now2(),restoredBy:user.name};
     if(window.db){try{await window.db.collection("orders").doc(id).update(patch);toast2("Order restored");}catch(e){toast2("Restore failed","err");}}
@@ -915,7 +956,7 @@ function App(){
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
           {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office" wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer}/>}
-          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user} initialOrderId={pendingOrderId} onConsumeInitialOrder={()=>setPendingOrderId(null)}/>}
+          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} bulkAdvanceOrders={bulkAdvanceOrders} toast2={toast2} user={user} initialOrderId={pendingOrderId} onConsumeInitialOrder={()=>setPendingOrderId(null)}/>}
           {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
           {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2} user={user}/>}
           {page==="wholesale"&&<Wholesale orders={activeOrders} allOrders={orders} wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer} updWholesaleCustomer={updWholesaleCustomer} delWholesaleCustomer={delWholesaleCustomer} addOrder={addOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2} openOrder={openOrderInList}/>}
@@ -1108,6 +1149,42 @@ function DeleteConfirm({order,onConfirm,onCancel}){
         <div style={{display:"flex",gap:10}}>
           <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={onCancel}>Cancel</button>
           <button className="btn btn-red" style={{flex:1,justifyContent:"center"}} onClick={onConfirm}><i className="ti ti-trash"/>Move to Trash</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BulkDeliverConfirm({count,onConfirm,onCancel}){
+  const [pm,setPm]=useState("Cash");
+  const [loc,setLoc]=useState("At Office");
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+      <div style={{background:"#fff",borderRadius:16,padding:24,maxWidth:380,width:"100%"}}>
+        <div style={{width:52,height:52,background:"#e6f6ef",borderRadius:"50%",display:"flex",alignItems:"center",justifyContent:"center",margin:"0 auto 14px"}}>
+          <i className="ti ti-truck-delivery" style={{fontSize:26,color:"#1d9e75"}}/>
+        </div>
+        <div style={{fontSize:16,fontWeight:700,marginBottom:6,textAlign:"center"}}>Mark {count} Order{count===1?"":"s"} Delivered & Paid?</div>
+        <div style={{fontSize:12,color:"#a35a00",background:"#fff3e0",borderRadius:9,padding:"8px 12px",marginBottom:16,textAlign:"center"}}>This clears any pending balance on each selected order and marks it fully paid. Only orders not already Delivered will be affected.</div>
+        <div style={{marginBottom:12}}>
+          <div style={{fontSize:11,color:"#999",marginBottom:5}}>Payment Method</div>
+          <select className="inp" value={pm} onChange={e=>setPm(e.target.value)}>
+            <option value="Cash">Cash</option>
+            <option value="UPI">UPI</option>
+            <option value="Card">Card</option>
+            <option value="Bank Transfer">Bank Transfer</option>
+          </select>
+        </div>
+        <div style={{marginBottom:18}}>
+          <div style={{fontSize:11,color:"#999",marginBottom:5}}>Collection Location</div>
+          <select className="inp" value={loc} onChange={e=>setLoc(e.target.value)}>
+            <option value="At Office">At Office</option>
+            <option value="At Production">At Production (Factory Pickup)</option>
+          </select>
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={onCancel}>Cancel</button>
+          <button className="btn btn-green" style={{flex:1,justifyContent:"center"}} onClick={()=>onConfirm(pm,loc)}><i className="ti ti-check"/>Confirm</button>
         </div>
       </div>
     </div>
@@ -2276,7 +2353,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
 }
 
 // ── ORDER LIST ──
-function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,toast2,user,initialOrderId,onConsumeInitialOrder}){
+function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,bulkAdvanceOrders,toast2,user,initialOrderId,onConsumeInitialOrder}){
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
   const [typeFl,setTypeFl]=useState("all");
@@ -2297,6 +2374,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   const [histOrder,setHistOrder]=useState(null);
   const [bulkMode,setBulkMode]=useState(false);
   const [selectedIds,setSelectedIds]=useState(new Set());
+  const [bulkDeliverConfirm,setBulkDeliverConfirm]=useState(false); // shows payment/location picker before bulk-marking Delivered & Paid
   const [expandedGroups,setExpandedGroups]=useState(new Set());
   const isAdmin=user.role==="Admin";
 
@@ -2596,6 +2674,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
     <div style={{maxWidth:1240,margin:"0 auto"}}>
       {histOrder&&<OrderHistoryPanel order={histOrder} onClose={()=>setHistOrder(null)}/>}
       {delTarget&&<DeleteConfirm order={delTarget} onCancel={()=>setDelTarget(null)} onConfirm={()=>{delOrder(delTarget.id);setDelTarget(null);}}/>}
+      {bulkDeliverConfirm&&<BulkDeliverConfirm count={selectedIds.size} onCancel={()=>setBulkDeliverConfirm(false)} onConfirm={(payMethod,loc)=>{bulkAdvanceOrders([...selectedIds],"deliver",{payMethod,loc});setSelectedIds(new Set());setBulkMode(false);setBulkDeliverConfirm(false);}}/>}
       <div className="orders-shell" style={{background:"#fff",border:"1px solid #edf0f4",borderRadius:16,padding:18,boxShadow:"0 16px 42px rgba(15,23,42,.07)",marginBottom:16}}>
         <div className="orders-header" style={{display:"flex",justifyContent:"space-between",alignItems:"flex-end",gap:16,flexWrap:"wrap",marginBottom:16}}>
           <div>
@@ -2658,6 +2737,15 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
           <div style={{color:"#fff",fontSize:13,fontWeight:800}}>{selectedIds.size} selected</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <button className="btn btn-outline" style={{fontSize:12,color:"#cbd5e1",borderColor:"#374151",background:"#1f2937"}} onClick={()=>setSelectedIds(new Set())}>Clear</button>
+            <button className="btn" style={{fontSize:13,background:"#6a1bb5",color:"#fff",opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>{bulkAdvanceOrders([...selectedIds],"dispatch");setSelectedIds(new Set());setBulkMode(false);}}>
+              <i className="ti ti-truck"/>Dispatch Selected
+            </button>
+            <button className="btn" style={{fontSize:13,background:"#0f6e56",color:"#fff",opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>{bulkAdvanceOrders([...selectedIds],"receive");setSelectedIds(new Set());setBulkMode(false);}}>
+              <i className="ti ti-package"/>Receive Selected
+            </button>
+            <button className="btn btn-green" style={{fontSize:13,opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>setBulkDeliverConfirm(true)}>
+              <i className="ti ti-truck-delivery"/>Deliver Selected
+            </button>
             <button className="btn btn-red" style={{fontSize:13,opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>{bulkDelOrders([...selectedIds]);setSelectedIds(new Set());setBulkMode(false);}}>
               <i className="ti ti-trash"/>Delete Selected
             </button>
