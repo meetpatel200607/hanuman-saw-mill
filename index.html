@@ -2475,7 +2475,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,b
     ["Today's Orders",todayOrders.length,"ti-calendar-plus","#0f766e"],
     ["Pending",sourceOrders.filter(o=>o.status===S.PEND).length,"ti-clock-pause","#dc2626"],
     ["Production",sourceOrders.filter(o=>o.status===S.PROD).length,"ti-tool","#f97316"],
-    ["Ready",sourceOrders.filter(o=>o.status===S.RECV||o.status===S.TRANSIT).length,"ti-package","#2563eb"],
+    ["In Transit",sourceOrders.filter(o=>o.status===S.RECV||o.status===S.TRANSIT).length,"ti-truck-delivery","#6a1bb5"],
     ["Delivered",sourceOrders.filter(o=>o.status===S.DELI).length,"ti-circle-check","#16a34a"],
     ["Today's Revenue",fmtM(todayRevenue),"ti-currency-rupee","#111827"],
   ];
@@ -2484,7 +2484,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,b
     if(/cancel/i.test(s)) return {label:"Cancelled",bg:"#f3f4f6",color:"#6b7280",border:"#e5e7eb"};
     if(s===S.PEND) return {label:"Factory Pending",bg:"#fff1f2",color:"#be123c",border:"#fecdd3"};
     if(s===S.PROD) return {label:"Production",bg:"#fff7ed",color:"#c2410c",border:"#fed7aa"};
-    if(s===S.TRANSIT||s===S.RECV) return {label:"Ready",bg:"#eff6ff",color:"#1d4ed8",border:"#bfdbfe"};
+    if(s===S.TRANSIT||s===S.RECV) return {label:"In Transit",bg:"#f0e6fb",color:"#6a1bb5",border:"#ddc7f5"};
     if(s===S.DELI&&Number(o.pending||0)<=0) return {label:"Paid",bg:"#ecfdf5",color:"#047857",border:"#a7f3d0"};
     if(s===S.DELI) return {label:"Delivered",bg:"#f0fdf4",color:"#15803d",border:"#bbf7d0"};
     return {label:s||"—",bg:"#f8fafc",color:"#475569",border:"#e2e8f0"};
