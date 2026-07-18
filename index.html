@@ -132,6 +132,16 @@ const genId=()=>"HSM-"+Math.random().toString(36).toUpperCase().slice(2,8);
 const now2=()=>new Date().toLocaleString("en-IN");
 const fmtM=n=>"₹"+Number(n||0).toLocaleString("en-IN");
 const fmtD=d=>d?new Date(d).toLocaleDateString("en-IN"):"—";
+const timeAgoShort=ms=>{
+  if(!ms) return "—";
+  const s=Math.max(0,Math.floor((Date.now()-ms)/1000));
+  if(s<10) return "just now";
+  if(s<60) return s+"s ago";
+  const m=Math.floor(s/60);
+  if(m<60) return m+"m ago";
+  const h=Math.floor(m/60);
+  return h+"h ago";
+};
 const fmtON=n=>n?"#"+String(n).padStart(3,"0"):"—";
 // Formats a bare order number with the correct prefix for its source — "#100" for Office, "F100" for Factory.
 const fmtONForSource=(n,source)=>n?(source==="Factory"?"F":"#")+String(n).padStart(3,"0"):"—";
@@ -627,6 +637,9 @@ function App(){
   const [authChecked,setAuthChecked]=useState(!window.auth); // if no auth configured, skip straight to login
   const [page,setPage]=useState("dashboard");
   const [orders,setOrders]=useState([]);
+  const [lastSyncedAt,setLastSyncedAt]=useState(null);
+  const [nowTick,setNowTick]=useState(Date.now());
+  useEffect(()=>{const t=setInterval(()=>setNowTick(Date.now()),10000);return()=>clearInterval(t);},[]);
   const [wholesaleCustomers,setWholesaleCustomers]=useState([]);
   const [pendingOrderId,setPendingOrderId]=useState(null); // set when a wholesale party's order should open in the existing Order Details page
   const [pendingOrderFilter,setPendingOrderFilter]=useState(null); // set when Dashboard/Reports/Design want All Orders opened pre-filtered (e.g. overdue, a specific status)
@@ -658,6 +671,7 @@ function App(){
     const unsub=window.db.collection("orders").orderBy("createdTs","desc").onSnapshot(snap=>{
       const docs=normalizeOrderNumbers(snap.docs.map(d=>({...d.data(),id:d.id})));
       setOrders(docs);
+      setLastSyncedAt(Date.now());
       setLoading(false);
       const deliveredCutoff=Date.now()-15*24*60*60*1000;
       docs.filter(o=>o.status===S.DELI&&Number(o.pending||0)===0&&o.deliveredAt).forEach(o=>{
@@ -678,6 +692,27 @@ function App(){
   },[user]);
 
   useEffect(()=>{if(!window.db)setOrders(normalizeOrderNumbers(SEED));},[]);
+
+  // ── Force a fresh server re-check whenever the app regains focus ──
+  // On phones/PWAs, backgrounding the app (switching to WhatsApp, taking a call, screen lock)
+  // can pause the realtime Firestore connection. It usually catches up on its own within a
+  // second or two, but not always instantly — so returning to the app can briefly show a stale
+  // order list until it does. This forces an immediate server-fresh fetch on every return to
+  // close that gap, rather than waiting on the listener to notice by itself.
+  useEffect(()=>{
+    if(!window.db||!user) return;
+    const resync=()=>{
+      if(document.visibilityState!=="visible") return;
+      window.db.collection("orders").get({source:"server"}).then(snap=>{
+        const docs=normalizeOrderNumbers(snap.docs.map(d=>({...d.data(),id:d.id})));
+        setOrders(docs);
+        setLastSyncedAt(Date.now());
+      }).catch(()=>{});
+    };
+    document.addEventListener("visibilitychange",resync);
+    window.addEventListener("focus",resync);
+    return()=>{document.removeEventListener("visibilitychange",resync);window.removeEventListener("focus",resync);};
+  },[user]);
 
   // ── OneSignal: tag this device as "factory" so Factory Staff AND Admin receive
   // new-order push notifications (Office/Accounts do not). Tagging can happen
@@ -922,9 +957,10 @@ function App(){
           );})}
         </nav>
         <div style={{borderTop:"1px solid #2a2a2a",paddingTop:12,marginTop:8}}>
-          <div style={{display:"flex",alignItems:"center",gap:6,padding:"4px 10px",marginBottom:8}}>
+          <div onClick={()=>{if(window.db){window.db.collection("orders").get({source:"server"}).then(snap=>{setOrders(normalizeOrderNumbers(snap.docs.map(d=>({...d.data(),id:d.id}))));setLastSyncedAt(Date.now());}).catch(()=>{});}}} style={{display:"flex",alignItems:"center",gap:6,padding:"4px 10px",marginBottom:8,cursor:dbMode?"pointer":"default"}} title={dbMode?"Tap to refresh now":""}>
             <div style={{width:7,height:7,borderRadius:"50%",background:dbMode?"#1d9e75":"#cc0000",flexShrink:0}}/>
             <div style={{fontSize:10,color:dbMode?"#3d9e75":"#cc6666"}}>{dbMode?"Cloud Sync ON":"Local Only"}</div>
+            {dbMode&&<div style={{fontSize:9.5,color:"#555",marginLeft:"auto"}}>{lastSyncedAt?timeAgoShort(lastSyncedAt):""}</div>}
           </div>
           <div style={{display:"flex",alignItems:"center",gap:8,padding:"4px 10px",marginBottom:8}}>
             <div style={{width:30,height:30,borderRadius:"50%",background:"#cc0000",display:"flex",alignItems:"center",justifyContent:"center",fontSize:12,fontWeight:700,color:"#fff"}}>{user.name[0]}</div>
