@@ -4380,6 +4380,10 @@ function Reports({orders,openOrder,openFilteredOrders}){
   const dayAdvOrders=orders.filter(o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===dateSel&&Number(o.advance)>0;});
   const dayAdvCash=dayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash").reduce((a,o)=>a+Number(o.advance),0);
   const dayAdvUPI=dayAdvOrders.filter(o=>o.advPayMethod==="UPI").reduce((a,o)=>a+Number(o.advance),0);
+  const cashAdvOrders=dayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash");
+  const upiAdvOrders=dayAdvOrders.filter(o=>o.advPayMethod==="UPI");
+  const otherAdvOrders=dayAdvOrders.filter(o=>o.advPayMethod&&o.advPayMethod!=="Cash"&&o.advPayMethod!=="UPI");
+  const dayAdvOther=otherAdvOrders.reduce((a,o)=>a+Number(o.advance),0);
   // Total cash in hand = final cash payments + advance cash received today
   const totalCashInHand=cashTotal+dayAdvCash;
 
@@ -4500,31 +4504,32 @@ function Reports({orders,openOrder,openFilteredOrders}){
           </div>
 
           {/* Payment Method Breakdown */}
-          <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>Payment Method Breakdown</div>
+          <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:2}}>Payment Method Breakdown</div>
+          <div style={{fontSize:11,color:"#bbb",marginBottom:10}}>Includes advances received today, so this matches what's actually in the drawer</div>
           <div style={{display:"grid",gridTemplateColumns:"repeat(auto-fit,minmax(160px,1fr))",gap:12,marginBottom:18}}>
             <div className="card" style={{padding:"14px 16px"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:9,background:"#e1f5ee",display:"flex",alignItems:"center",justifyContent:"center"}}><i className="ti ti-cash" style={{color:"#1d9e75",fontSize:16}}/></div>
                 <div style={{fontSize:11,color:"#999",fontWeight:600}}>Cash</div>
               </div>
-              <div style={{fontSize:22,fontWeight:700,color:"#1d9e75"}}>{fmtM(cashTotal)}</div>
-              <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>{cashOrders.length} order{cashOrders.length===1?"":"s"}</div>
+              <div style={{fontSize:22,fontWeight:700,color:"#1d9e75"}}>{fmtM(totalCashInHand)}</div>
+              <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>{cashOrders.length} delivered + {cashAdvOrders.length} advance{cashAdvOrders.length===1?"":"s"}</div>
             </div>
             <div className="card" style={{padding:"14px 16px"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:9,background:"#e6f1fb",display:"flex",alignItems:"center",justifyContent:"center"}}><i className="ti ti-qrcode" style={{color:"#185fa5",fontSize:16}}/></div>
                 <div style={{fontSize:11,color:"#999",fontWeight:600}}>UPI</div>
               </div>
-              <div style={{fontSize:22,fontWeight:700,color:"#185fa5"}}>{fmtM(upiTotal)}</div>
-              <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>{upiOrders.length} order{upiOrders.length===1?"":"s"}</div>
+              <div style={{fontSize:22,fontWeight:700,color:"#185fa5"}}>{fmtM(upiTotal+dayAdvUPI)}</div>
+              <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>{upiOrders.length} delivered + {upiAdvOrders.length} advance{upiAdvOrders.length===1?"":"s"}</div>
             </div>
-            {otherOrders.length>0&&<div className="card" style={{padding:"14px 16px"}}>
+            {(otherOrders.length>0||otherAdvOrders.length>0)&&<div className="card" style={{padding:"14px 16px"}}>
               <div style={{display:"flex",alignItems:"center",gap:8,marginBottom:6}}>
                 <div style={{width:32,height:32,borderRadius:9,background:"#faeeda",display:"flex",alignItems:"center",justifyContent:"center"}}><i className="ti ti-building-bank" style={{color:"#854f0b",fontSize:16}}/></div>
                 <div style={{fontSize:11,color:"#999",fontWeight:600}}>Other</div>
               </div>
-              <div style={{fontSize:22,fontWeight:700,color:"#854f0b"}}>{fmtM(otherOrders.reduce((a,o)=>a+deliveryPaymentOf(o),0))}</div>
-              <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>{otherOrders.length} order{otherOrders.length===1?"":"s"}</div>
+              <div style={{fontSize:22,fontWeight:700,color:"#854f0b"}}>{fmtM(otherOrders.reduce((a,o)=>a+deliveryPaymentOf(o),0)+dayAdvOther)}</div>
+              <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>{otherOrders.length} delivered + {otherAdvOrders.length} advance{otherAdvOrders.length===1?"":"s"}</div>
             </div>}
           </div>
 
