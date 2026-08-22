@@ -4076,7 +4076,7 @@ function parseLocaleDateMs(str){
 const todayKey=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
 
 // ── CUSTOMER TAB (used inside Reports) ──
-function CustomerTab({orders,custQ,setCustQ}){
+function CustomerTab({orders,custQ,setCustQ,openOrder}){
   const [expanded,setExpanded]=useState(null); // mobile key of expanded customer
 
   const allCustomers=useMemo(()=>{
@@ -4141,7 +4141,7 @@ function CustomerTab({orders,custQ,setCustQ}){
                 <div style={{borderTop:"1px solid #f5f2ee",padding:"8px 16px 14px"}}>
                   <div style={{display:"flex",flexDirection:"column",gap:0}}>
                     {c.orders.map((o,i)=>(
-                      <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<c.orders.length-1?"1px solid #f5f2ee":"none",flexWrap:"wrap",gap:6}}>
+                      <div key={o.id} onClick={()=>openOrder&&openOrder(o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<c.orders.length-1?"1px solid #f5f2ee":"none",flexWrap:"wrap",gap:6,cursor:openOrder?"pointer":"default"}}>
                         <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
                           {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:13,flexShrink:0}}>{displayOrderNum(o,orders)}</span>}
                           {isFactoryOrder(o)&&<FactoryOrderBadge/>}
@@ -4504,26 +4504,26 @@ function Reports({orders,allOrders,openOrder}){
       {tab==="delivered"&&<Table rows={deli} cols={["orderNum","factoryOrder","created","id","customer","product","wood","size","qty","deliveryCollectionLocation","designType","designCost","total","payMethod","deliveredLocation","deliveredAt"]} onRowClick={openOrder}/>}
 
       {tab==="customers"&&(
-        <CustomerTab orders={orders} custQ={custQ} setCustQ={setCustQ}/>
+        <CustomerTab orders={orders} custQ={custQ} setCustQ={setCustQ} openOrder={openOrder}/>
       )}
 
       {tab==="design"&&(
-        <DesignRevenueTab orders={orders}/>
+        <DesignRevenueTab orders={orders} openOrder={openOrder}/>
       )}
 
       {tab==="wholesale"&&(
-        <WholesaleReportTab orders={orders}/>
+        <WholesaleReportTab orders={orders} openOrder={openOrder}/>
       )}
 
       {tab==="feedback"&&(
-        <FeedbackTab orders={orders} rated={rated}/>
+        <FeedbackTab orders={orders} rated={rated} openOrder={openOrder}/>
       )}
     </div>
   );
 }
 
 // ── DESIGN REVENUE TAB (Reports) ──
-function DesignRevenueTab({orders}){
+function DesignRevenueTab({orders,openOrder}){
   const [range,setRange]=useState("today");
   const [dateFrom,setDateFrom]=useState(todayKey());
   const [dateTo,setDateTo]=useState(todayKey());
@@ -4625,7 +4625,7 @@ function DesignRevenueTab({orders}){
             </tr></thead>
             <tbody>
               {filtered.map(o=>(
-                <tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>
+                <tr key={o.id} onClick={()=>openOrder&&openOrder(o)} style={{borderBottom:"1px solid #fafaf8",cursor:openOrder?"pointer":"default"}}>
                   <td style={{padding:"9px 10px",fontWeight:900,color:"#cc0000"}}>{displayOrderNum(o,orders)}</td>
                   <td style={{padding:"9px 10px",fontWeight:600}}>{o.customer}</td>
                   <td style={{padding:"9px 10px",color:"#a35a00",fontWeight:600}}>{o.designType||"—"}</td>
@@ -4649,7 +4649,7 @@ function DesignRevenueTab({orders}){
 
 // ── WHOLESALE REPORT TAB (Reports) ── Wholesale orders already count in every other report
 // (Daily/Monthly totals include them like any order); this tab isolates them for a focused view.
-function WholesaleReportTab({orders}){
+function WholesaleReportTab({orders,openOrder}){
   const [range,setRange]=useState("month");
   const [dateFrom,setDateFrom]=useState(todayKey());
   const [dateTo,setDateTo]=useState(todayKey());
@@ -4746,7 +4746,7 @@ function WholesaleReportTab({orders}){
             </tr></thead>
             <tbody>
               {filtered.map(o=>(
-                <tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>
+                <tr key={o.id} onClick={()=>openOrder&&openOrder(o)} style={{borderBottom:"1px solid #fafaf8",cursor:openOrder?"pointer":"default"}}>
                   <td style={{padding:"9px 10px",fontWeight:900,color:"#cc0000"}}>{displayOrderNum(o,orders)}</td>
                   <td style={{padding:"9px 10px",fontWeight:600}}>{o.customer}</td>
                   <td style={{padding:"9px 10px"}}>{fmtM(orderTotalOf(o))}</td>
@@ -4769,7 +4769,7 @@ function WholesaleReportTab({orders}){
 }
 
 // ── FEEDBACK TAB (rating analytics) ──
-function FeedbackTab({orders,rated}){
+function FeedbackTab({orders,rated,openOrder}){
   const deliCount=orders.filter(o=>o.status===S.DELI).length;
   const sentCount=orders.filter(o=>o.feedbackSent).length;
   const avgRating=rated.length?(rated.reduce((a,o)=>a+o.customerRating,0)/rated.length):0;
@@ -4833,7 +4833,7 @@ function FeedbackTab({orders,rated}){
       <div style={{display:"flex",flexDirection:"column",gap:9}}>
         {rated.length===0&&<div style={{textAlign:"center",padding:30,color:"#bbb",background:"#fff",borderRadius:14}}>No ratings received yet</div>}
         {rated.slice().reverse().map(o=>(
-          <div key={o.id} className="card" style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
+          <div key={o.id} className="card" onClick={()=>openOrder&&openOrder(o)} style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,cursor:openOrder?"pointer":"default"}}>
             <div>
               <div style={{fontWeight:600,fontSize:13}}>{o.customer}</div>
               <div style={{fontSize:11,color:"#bbb"}}>{o.orderNum?displayOrderNum(o,orders)+" · ":""}{o.product}</div>
