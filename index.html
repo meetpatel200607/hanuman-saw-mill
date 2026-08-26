@@ -943,9 +943,11 @@ function Dashboard({orders,goto,user}){
   const todayAdvOrders=todayOrders.filter(o=>Number(o.advance)>0);
   const sales=todayOrders.reduce((a,o)=>a+orderTotalOf(o),0);
   // Revenue = Cash + UPI + Other Payments actually received today (product amount only — Design Revenue is tracked separately below and must not be mixed in here).
-  const cashCollected=todayDelivered.filter(o=>o.payMethod==="Cash").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash").reduce((a,o)=>a+Number(o.advance||0),0);
-  const upiCollected=todayDelivered.filter(o=>o.payMethod==="UPI").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod==="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
-  const otherCollected=todayDelivered.filter(o=>o.payMethod&&o.payMethod!=="Cash"&&o.payMethod!=="UPI").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod&&o.advPayMethod!=="Cash"&&o.advPayMethod!=="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
+  // Uses deliveryPaymentOf (total − advance − pending) instead of the full order value, so an order
+  // that got both an advance AND a final payment today doesn't have its advance counted twice.
+  const cashCollected=todayDelivered.filter(o=>o.payMethod==="Cash").reduce((a,o)=>a+deliveryPaymentOf(o),0)+todayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash").reduce((a,o)=>a+Number(o.advance||0),0);
+  const upiCollected=todayDelivered.filter(o=>o.payMethod==="UPI").reduce((a,o)=>a+deliveryPaymentOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod==="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
+  const otherCollected=todayDelivered.filter(o=>o.payMethod&&o.payMethod!=="Cash"&&o.payMethod!=="UPI").reduce((a,o)=>a+deliveryPaymentOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod&&o.advPayMethod!=="Cash"&&o.advPayMethod!=="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
   // Today's Revenue = total worth of every order placed today (product + design), i.e. the full order value —
   // this already includes outstanding balances and advance received, not just money actually collected.
   const todayRevenue=sales;
@@ -2392,7 +2394,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   // Today's Revenue = Cash + UPI + Other Payments received today (excludes Design Revenue), same definition as the Dashboard — payments received today only, each counted once.
   const todayDeliveredOL=sourceOrders.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===todayKeyNow;});
   const todayAdvOrdersOL=todayOrders.filter(o=>Number(o.advance)>0);
-  const todayRevenue=todayDeliveredOL.reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrdersOL.reduce((a,o)=>a+Number(o.advance||0),0);
+  const todayRevenue=todayDeliveredOL.reduce((a,o)=>a+deliveryPaymentOf(o),0)+todayAdvOrdersOL.reduce((a,o)=>a+Number(o.advance||0),0);
   const summary=[
     ["Today's Orders",todayOrders.length,"ti-calendar-plus","#0f766e"],
     ["Pending",sourceOrders.filter(o=>o.status===S.PEND).length,"ti-clock-pause","#dc2626"],
@@ -4212,8 +4214,9 @@ function Reports({orders,allOrders,openOrder}){
   const cashOrders=dayDeli.filter(o=>o.payMethod==="Cash");
   const upiOrders=dayDeli.filter(o=>o.payMethod==="UPI");
   const otherOrders=dayDeli.filter(o=>o.payMethod&&o.payMethod!=="Cash"&&o.payMethod!=="UPI");
-  const cashTotal=cashOrders.reduce((a,o)=>a+orderTotalOf(o),0);
-  const upiTotal=upiOrders.reduce((a,o)=>a+orderTotalOf(o),0);
+  // deliveryPaymentOf, not orderTotalOf — a partially-paid order shouldn't count its still-pending balance as collected.
+  const cashTotal=cashOrders.reduce((a,o)=>a+deliveryPaymentOf(o),0);
+  const upiTotal=upiOrders.reduce((a,o)=>a+deliveryPaymentOf(o),0);
   const atOffice=dayDeli.filter(o=>o.deliveredLocation==="At Office").length;
   const atProduction=dayDeli.filter(o=>o.deliveredLocation==="At Production").length;
 
@@ -4282,8 +4285,8 @@ function Reports({orders,allOrders,openOrder}){
     const m=getMonthEntry(p.monthKey);
     m.label=m.label||p.monthLabel;
     m.orders.push(o);
-    if(o.payMethod==="Cash"){m.cashCount++;m.cashTotal+=orderTotalOf(o);}
-    if(o.payMethod==="UPI"){m.upiCount++;m.upiTotal+=orderTotalOf(o);}
+    if(o.payMethod==="Cash"){m.cashCount++;m.cashTotal+=deliveryPaymentOf(o);}
+    if(o.payMethod==="UPI"){m.upiCount++;m.upiTotal+=deliveryPaymentOf(o);}
     if(o.deliveredLocation==="At Office")m.office++;
     if(o.deliveredLocation==="At Production")m.production++;
   });
@@ -4364,7 +4367,7 @@ function Reports({orders,allOrders,openOrder}){
                 <div style={{width:32,height:32,borderRadius:9,background:"#faeeda",display:"flex",alignItems:"center",justifyContent:"center"}}><i className="ti ti-building-bank" style={{color:"#854f0b",fontSize:16}}/></div>
                 <div style={{fontSize:11,color:"#999",fontWeight:600}}>Other</div>
               </div>
-              <div style={{fontSize:22,fontWeight:700,color:"#854f0b"}}>{fmtM(otherOrders.reduce((a,o)=>a+orderTotalOf(o),0))}</div>
+              <div style={{fontSize:22,fontWeight:700,color:"#854f0b"}}>{fmtM(otherOrders.reduce((a,o)=>a+deliveryPaymentOf(o),0))}</div>
               <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>{otherOrders.length} order{otherOrders.length===1?"":"s"}</div>
             </div>}
           </div>
