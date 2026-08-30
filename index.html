@@ -280,6 +280,34 @@ function normalizeOrderNumbers(list){
   });
 }
 
+// ── BULK STATUS OVERRIDE ── Used by Admin to jump a batch of orders straight to a target status
+// (e.g. when a factory staff absence has left orders stuck at "Pending Factory Acceptance" or
+// "In Production" even though they were actually handled in real life). Any workflow steps that
+// were skipped (Accept / Dispatch / Receive / Deliver) get auto-filled with the acting Admin's
+// name and the current time, so history and downstream reports stay consistent.
+const buildStatusOverridePatch=(o,targetStatus,userName)=>{
+  const nowStr=now2();
+  const patch={status:targetStatus};
+  const factoryOrder=isFactoryOrder(o);
+  const needsAccept=[S.PROD,S.TRANSIT,S.RECV,S.DELI].includes(targetStatus);
+  const needsDispatch=[S.TRANSIT,S.RECV,S.DELI].includes(targetStatus)&&!factoryOrder;
+  const needsReceive=[S.RECV,S.DELI].includes(targetStatus)&&!factoryOrder;
+  const needsDeliver=targetStatus===S.DELI;
+
+  if(needsAccept&&!o.acceptedAt){patch.acceptedAt=nowStr;patch.acceptedBy=userName;}
+  if(needsDispatch&&!o.dispatchedAt){patch.dispatchedAt=nowStr;patch.dispatchedBy=userName;}
+  if(needsReceive&&!o.receivedAt){patch.receivedAt=nowStr;patch.receivedBy=userName;}
+  if(needsDeliver){
+    patch.pending=0;
+    if(!o.payMethod) patch.payMethod="Cash";
+    patch.payAt=o.payAt||nowStr;
+    patch.deliveredAt=o.deliveredAt||nowStr;
+    patch.deliveredBy=o.deliveredBy||userName;
+    patch.deliveredLocation=o.deliveredLocation||(o.deliveryCollectionLocation==="Factory Pickup"?"At Production":"At Office");
+  }
+  return patch;
+};
+
 const SEED=[
   {id:"HSM-DEMO1",orderNum:1,customer:"Ramesh Sharma",mobile:"9876543210",product:"Umbra Patti",wood:"Khair",size:'2"x4"x10',qty:50,advance:5000,pending:7500,total:12500,delivery:"2026-05-20",notes:"Smooth finish",status:S.PEND,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"Cash",payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:""},
   {id:"HSM-DEMO2",orderNum:2,customer:"Priya Patel",mobile:"9988776655",product:"Door Frame",wood:"Sisam",size:'4"x3"x7',qty:10,advance:2000,pending:3000,total:5000,delivery:"2026-05-15",notes:"",status:S.RECV,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"Cash",payMethod:"",payAt:"",receivedAt:now2(),receivedBy:"Ravi Kumar",deliveredAt:"",deliveredBy:"",deliveredLocation:"",acceptedAt:now2(),acceptedBy:"Suresh Factory",dispatchedAt:now2(),dispatchedBy:"Suresh Factory",feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:""},
@@ -815,6 +843,37 @@ function App(){
     }
   };
 
+  // ── Bulk Status Override (Admin only) ── jumps a batch of selected orders straight to a target
+  // status in one write, auto-backfilling any skipped workflow steps. Built for catching up orders
+  // stuck behind a missing factory scan (e.g. factory staff was out) without re-processing each one
+  // individually through Accept → Dispatch → Receive → Deliver.
+  const bulkSetStatus=async(ids,targetStatus)=>{
+    if(user.role!=="Admin"){toast2("Only Admin can bulk-change order status","err");return;}
+    const unique=[...new Set(ids)].filter(Boolean);
+    if(!unique.length)return;
+    const h=makeHistoryEntry("Bulk Status Override (Admin) → "+targetStatus,"Admin");
+    if(window.db){
+      try{
+        const batch=window.db.batch();
+        unique.forEach(id=>{
+          const o=orders.find(x=>x.id===id);
+          if(!o) return;
+          const patch=buildStatusOverridePatch(o,targetStatus,user.name);
+          batch.update(window.db.collection("orders").doc(id),{...patch,history:firebase.firestore.FieldValue.arrayUnion(h)});
+        });
+        await batch.commit();
+        toast2(unique.length+" order"+(unique.length===1?"":"s")+" updated to "+targetStatus);
+      }catch(e){toast2("Bulk status update failed","err");}
+    }else{
+      setOrders(p=>p.map(o=>{
+        if(!unique.includes(o.id)) return o;
+        const patch=buildStatusOverridePatch(o,targetStatus,user.name);
+        return {...o,...patch,history:[...(o.history||[]),h]};
+      }));
+      toast2(unique.length+" order"+(unique.length===1?"":"s")+" updated to "+targetStatus);
+    }
+  };
+
   const restoreOrder=async id=>{
     const patch={deleted:false,restoredAt:now2(),restoredBy:user.name};
     if(window.db){try{await window.db.collection("orders").doc(id).update(patch);toast2("Order restored");}catch(e){toast2("Restore failed","err");}}
@@ -915,7 +974,7 @@ function App(){
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
           {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office" wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer}/>}
-          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user} initialOrderId={pendingOrderId} onConsumeInitialOrder={()=>setPendingOrderId(null)}/>}
+          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} bulkSetStatus={bulkSetStatus} toast2={toast2} user={user} initialOrderId={pendingOrderId} onConsumeInitialOrder={()=>setPendingOrderId(null)}/>}
           {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
           {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2} user={user}/>}
           {page==="wholesale"&&<Wholesale orders={activeOrders} allOrders={orders} wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer} updWholesaleCustomer={updWholesaleCustomer} delWholesaleCustomer={delWholesaleCustomer} addOrder={addOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2} openOrder={openOrderInList}/>}
@@ -1130,6 +1189,41 @@ function PermanentDeleteConfirm({order,onConfirm,onCancel}){
         <div style={{display:"flex",gap:10}}>
           <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={onCancel}>Cancel</button>
           <button className="btn btn-red" style={{flex:1,justifyContent:"center"}} onClick={onConfirm}><i className="ti ti-trash"/>Delete Forever</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── BULK STATUS OVERRIDE MODAL (Admin) ── Lets Admin pick a target status to apply to every
+// selected order in one shot — for catching up orders stuck behind a missed factory step.
+function BulkStatusModal({count,onConfirm,onCancel}){
+  const [target,setTarget]=useState(S.DELI);
+  const options=[
+    {v:S.PROD,label:"In Production",desc:"Marks orders as Accepted by Factory"},
+    {v:S.TRANSIT,label:"In Transit",desc:"Marks orders as Accepted + Dispatched"},
+    {v:S.RECV,label:"Received at Office",desc:"Marks orders as Accepted + Dispatched + Received"},
+    {v:S.DELI,label:"Delivered & Paid",desc:"Marks orders fully complete — Pending cleared to ₹0"},
+  ];
+  return(
+    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onCancel}>
+      <div className="card" style={{maxWidth:420,width:"100%"}} onClick={e=>e.stopPropagation()}>
+        <div style={{fontWeight:800,fontSize:16,marginBottom:4}}>Bulk Status Override</div>
+        <div style={{fontSize:12.5,color:"#888",marginBottom:16}}>{count} order{count===1?"":"s"} selected. This skips the normal step-by-step workflow — use it to catch up orders stuck behind a missed factory scan.</div>
+        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
+          {options.map(o=>(
+            <button key={o.v} type="button" onClick={()=>setTarget(o.v)} style={{textAlign:"left",padding:"11px 14px",borderRadius:12,border:target===o.v?"1.5px solid #cc0000":"1.5px solid #e0ddd8",background:target===o.v?"#fff5f5":"#fff",cursor:"pointer",fontFamily:"inherit"}}>
+              <div style={{fontWeight:700,fontSize:13.5,color:target===o.v?"#cc0000":"#1a1a1a"}}>{o.label}</div>
+              <div style={{fontSize:11.5,color:"#999",marginTop:2}}>{o.desc}</div>
+            </button>
+          ))}
+        </div>
+        <div style={{background:"#fff3e0",border:"1px solid #ffd9a0",borderRadius:10,padding:"9px 12px",fontSize:12,color:"#a35a00",marginBottom:18}}>
+          <i className="ti ti-alert-triangle" style={{marginRight:6}}/>Any skipped steps (Accept / Dispatch / Receive / Deliver) are auto-filled with your name and the current time, and logged in each order's History as a Bulk Status Override.
+        </div>
+        <div style={{display:"flex",gap:10}}>
+          <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={onCancel}>Cancel</button>
+          <button className="btn btn-red" style={{flex:1,justifyContent:"center"}} onClick={()=>onConfirm(target)}><i className="ti ti-check"/>Apply to {count}</button>
         </div>
       </div>
     </div>
@@ -2278,7 +2372,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
 }
 
 // ── ORDER LIST ──
-function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,toast2,user,initialOrderId,onConsumeInitialOrder}){
+function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,bulkSetStatus,toast2,user,initialOrderId,onConsumeInitialOrder}){
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
   const [typeFl,setTypeFl]=useState("all");
@@ -2300,6 +2394,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
   const [bulkMode,setBulkMode]=useState(false);
   const [selectedIds,setSelectedIds]=useState(new Set());
   const [expandedGroups,setExpandedGroups]=useState(new Set());
+  const [statusModalOpen,setStatusModalOpen]=useState(false);
   const isAdmin=user.role==="Admin";
 
   const matchQ=(o,q)=>{
@@ -2660,12 +2755,16 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,t
           <div style={{color:"#fff",fontSize:13,fontWeight:800}}>{selectedIds.size} selected</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
             <button className="btn btn-outline" style={{fontSize:12,color:"#cbd5e1",borderColor:"#374151",background:"#1f2937"}} onClick={()=>setSelectedIds(new Set())}>Clear</button>
+            <button className="btn" style={{fontSize:13,background:"#6a1bb5",color:"#fff",opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>setStatusModalOpen(true)}>
+              <i className="ti ti-replace"/>Set Status
+            </button>
             <button className="btn btn-red" style={{fontSize:13,opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>{bulkDelOrders([...selectedIds]);setSelectedIds(new Set());setBulkMode(false);}}>
               <i className="ti ti-trash"/>Delete Selected
             </button>
           </div>
         </div>
       )}
+      {statusModalOpen&&<BulkStatusModal count={selectedIds.size} onCancel={()=>setStatusModalOpen(false)} onConfirm={target=>{bulkSetStatus([...selectedIds],target);setSelectedIds(new Set());setBulkMode(false);setStatusModalOpen(false);}}/>}
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         {groupedFiltered.length===0&&<div style={{textAlign:"center",padding:48,color:"#94a3b8",background:"#fff",borderRadius:16,border:"1px solid #edf0f4",boxShadow:"0 12px 30px rgba(15,23,42,.05)"}}>{sourceFl==="Factory"?"No Factory orders found":"No orders found"}</div>}
         {groupedFiltered.map(({primary:o,subs})=>{
