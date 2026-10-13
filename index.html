@@ -2480,6 +2480,10 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,b
     return result;
   },[orders,q,fl,typeFl,sourceFl,woodFl]);
 
+  // ── Select All support — every order (incl. all sizes) currently visible after search/filters ──
+  const visibleIds=useMemo(()=>groupedFiltered.flatMap(g=>[g.primary.id,...g.subs.map(x=>x.id)]),[groupedFiltered]);
+  const allVisibleSelected=visibleIds.length>0&&visibleIds.every(id=>selectedIds.has(id));
+  const toggleSelectAll=()=>setSelectedIds(allVisibleSelected?new Set():new Set(visibleIds));
   const toggleGroup=gid=>setExpandedGroups(p=>{const n=new Set(p);n.has(gid)?n.delete(gid):n.add(gid);return n;});
   const todayKeyNow=todayKey();
   const isTodayOrder=o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===todayKeyNow;};
@@ -2754,11 +2758,14 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,b
         <div style={{background:"#111827",borderRadius:16,padding:"13px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,boxShadow:"0 10px 28px rgba(17,24,39,.18)"}}>
           <div style={{color:"#fff",fontSize:13,fontWeight:800}}>{selectedIds.size} selected</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button className="btn" style={{fontSize:12,background:allVisibleSelected?"#374151":"#fff",color:allVisibleSelected?"#fff":"#111827"}} onClick={toggleSelectAll} disabled={!visibleIds.length}>
+              <i className={`ti ${allVisibleSelected?"ti-square-off":"ti-checks"}`}/>{allVisibleSelected?"Deselect All":`Select All (${visibleIds.length})`}
+            </button>
             <button className="btn btn-outline" style={{fontSize:12,color:"#cbd5e1",borderColor:"#374151",background:"#1f2937"}} onClick={()=>setSelectedIds(new Set())}>Clear</button>
             <button className="btn" style={{fontSize:13,background:"#6a1bb5",color:"#fff",opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>setStatusModalOpen(true)}>
               <i className="ti ti-replace"/>Set Status
             </button>
-            <button className="btn btn-red" style={{fontSize:13,opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>{bulkDelOrders([...selectedIds]);setSelectedIds(new Set());setBulkMode(false);}}>
+            <button className="btn btn-red" style={{fontSize:13,opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>{if(!window.confirm("Move "+selectedIds.size+" order"+(selectedIds.size===1?"":"s")+" to Trash? You can restore them from Trash within 30 days."))return;bulkDelOrders([...selectedIds]);setSelectedIds(new Set());setBulkMode(false);}}>
               <i className="ti ti-trash"/>Delete Selected
             </button>
           </div>
