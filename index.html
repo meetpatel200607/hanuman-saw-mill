@@ -995,6 +995,7 @@ function App(){
 // ── DASHBOARD ──
 function Dashboard({orders,goto,user}){
   const canViewFinancial=["Admin","Accountant"].includes(user.role);
+  const [showRevenue,setShowRevenue]=useState(false); // Today's Revenue stays hidden until the eye is tapped
   const isOfficeOrFactory=["Office Staff","Factory Staff"].includes(user.role);
   const tKey=todayKey();
   const todayOrders=orders.filter(o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===tKey;});
@@ -1053,7 +1054,10 @@ function Dashboard({orders,goto,user}){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap",marginBottom:16}}>
             <div>
               <div style={{fontSize:11,color:"#ffb3b3",fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>Today's Revenue (Total Order Value)</div>
-              <div style={{fontSize:32,fontWeight:900,marginTop:4,color:"#fff"}}>{fmtM(todayRevenue)}</div>
+              <div style={{display:"flex",alignItems:"center",gap:12,marginTop:4}}>
+                <div style={{fontSize:32,fontWeight:900,color:"#fff",letterSpacing:showRevenue?0:2}}>{showRevenue?fmtM(todayRevenue):"₹ ••••••"}</div>
+                <button type="button" onClick={()=>setShowRevenue(v=>!v)} title={showRevenue?"Hide amount":"Show amount"} style={{background:"#2a2a2a",border:"1px solid #3a3a3a",borderRadius:10,width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#ddd",fontSize:20}}><i className={`ti ${showRevenue?"ti-eye":"ti-eye-off"}`}/></button>
+              </div>
               <div style={{fontSize:10.5,color:"#777",marginTop:3}}>Total worth of every order placed today — includes outstanding balances and advance received</div>
               <div style={{fontSize:12,color:"#bbb",marginTop:4}}>{todayOrders.length} orders · {totalQty} items</div>
             </div>
