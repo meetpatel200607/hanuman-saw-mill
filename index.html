@@ -181,6 +181,7 @@ const displayOrderNum=(o,orders=[])=>{
 const orderNumberTaken=(num,source,orders,excludeOrderId,excludeGroupId)=>{
   if(!num) return false;
   return orders.some(o=>{
+    if(isTrashed(o)) return false;
     if(excludeOrderId&&o.id===excludeOrderId) return false;
     const gid=o.groupId||o.id;
     if(excludeGroupId&&gid===excludeGroupId) return false;
@@ -279,34 +280,6 @@ function normalizeOrderNumbers(list){
     return {...o,orderNum:base,orderSuffix:o.orderSuffix!==undefined?o.orderSuffix:suffix};
   });
 }
-
-// ── BULK STATUS OVERRIDE ── Used by Admin to jump a batch of orders straight to a target status
-// (e.g. when a factory staff absence has left orders stuck at "Pending Factory Acceptance" or
-// "In Production" even though they were actually handled in real life). Any workflow steps that
-// were skipped (Accept / Dispatch / Receive / Deliver) get auto-filled with the acting Admin's
-// name and the current time, so history and downstream reports stay consistent.
-const buildStatusOverridePatch=(o,targetStatus,userName)=>{
-  const nowStr=now2();
-  const patch={status:targetStatus};
-  const factoryOrder=isFactoryOrder(o);
-  const needsAccept=[S.PROD,S.TRANSIT,S.RECV,S.DELI].includes(targetStatus);
-  const needsDispatch=[S.TRANSIT,S.RECV,S.DELI].includes(targetStatus)&&!factoryOrder;
-  const needsReceive=[S.RECV,S.DELI].includes(targetStatus)&&!factoryOrder;
-  const needsDeliver=targetStatus===S.DELI;
-
-  if(needsAccept&&!o.acceptedAt){patch.acceptedAt=nowStr;patch.acceptedBy=userName;}
-  if(needsDispatch&&!o.dispatchedAt){patch.dispatchedAt=nowStr;patch.dispatchedBy=userName;}
-  if(needsReceive&&!o.receivedAt){patch.receivedAt=nowStr;patch.receivedBy=userName;}
-  if(needsDeliver){
-    patch.pending=0;
-    if(!o.payMethod) patch.payMethod="Cash";
-    patch.payAt=o.payAt||nowStr;
-    patch.deliveredAt=o.deliveredAt||nowStr;
-    patch.deliveredBy=o.deliveredBy||userName;
-    patch.deliveredLocation=o.deliveredLocation||(o.deliveryCollectionLocation==="Factory Pickup"?"At Production":"At Office");
-  }
-  return patch;
-};
 
 const SEED=[
   {id:"HSM-DEMO1",orderNum:1,customer:"Ramesh Sharma",mobile:"9876543210",product:"Umbra Patti",wood:"Khair",size:'2"x4"x10',qty:50,advance:5000,pending:7500,total:12500,delivery:"2026-05-20",notes:"Smooth finish",status:S.PEND,created:now2(),createdBy:"Ravi Kumar",advPayMethod:"Cash",payMethod:"",payAt:"",receivedAt:"",receivedBy:"",deliveredAt:"",deliveredBy:"",deliveredLocation:"",acceptedAt:"",acceptedBy:"",dispatchedAt:"",dispatchedBy:"",feedbackSent:false,feedbackSentAt:"",customerRating:null,customerReviewText:""},
@@ -843,37 +816,6 @@ function App(){
     }
   };
 
-  // ── Bulk Status Override (Admin only) ── jumps a batch of selected orders straight to a target
-  // status in one write, auto-backfilling any skipped workflow steps. Built for catching up orders
-  // stuck behind a missing factory scan (e.g. factory staff was out) without re-processing each one
-  // individually through Accept → Dispatch → Receive → Deliver.
-  const bulkSetStatus=async(ids,targetStatus)=>{
-    if(user.role!=="Admin"){toast2("Only Admin can bulk-change order status","err");return;}
-    const unique=[...new Set(ids)].filter(Boolean);
-    if(!unique.length)return;
-    const h=makeHistoryEntry("Bulk Status Override (Admin) → "+targetStatus,"Admin");
-    if(window.db){
-      try{
-        const batch=window.db.batch();
-        unique.forEach(id=>{
-          const o=orders.find(x=>x.id===id);
-          if(!o) return;
-          const patch=buildStatusOverridePatch(o,targetStatus,user.name);
-          batch.update(window.db.collection("orders").doc(id),{...patch,history:firebase.firestore.FieldValue.arrayUnion(h)});
-        });
-        await batch.commit();
-        toast2(unique.length+" order"+(unique.length===1?"":"s")+" updated to "+targetStatus);
-      }catch(e){toast2("Bulk status update failed","err");}
-    }else{
-      setOrders(p=>p.map(o=>{
-        if(!unique.includes(o.id)) return o;
-        const patch=buildStatusOverridePatch(o,targetStatus,user.name);
-        return {...o,...patch,history:[...(o.history||[]),h]};
-      }));
-      toast2(unique.length+" order"+(unique.length===1?"":"s")+" updated to "+targetStatus);
-    }
-  };
-
   const restoreOrder=async id=>{
     const patch={deleted:false,restoredAt:now2(),restoredBy:user.name};
     if(window.db){try{await window.db.collection("orders").doc(id).update(patch);toast2("Order restored");}catch(e){toast2("Restore failed","err");}}
@@ -884,6 +826,32 @@ function App(){
     if(user.role!=="Admin"){toast2("Only Admin can permanently delete","err");return;}
     if(window.db){try{await window.db.collection("orders").doc(id).delete();toast2("Order permanently deleted");}catch(e){toast2("Permanent delete failed","err");}}
     else{setOrders(p=>p.filter(o=>o.id!==id));toast2("Order permanently deleted");}
+  };
+
+  const resetOrderNumbers=async()=>{
+    if(user.role!=="Admin"){toast2("Only Admin can reset order numbers","err");return;}
+    const live=orders.filter(o=>!isTrashed(o));
+    const byCreated=(a,b)=>(parseLocaleDateMs(a.created)||0)-(parseLocaleDateMs(b.created)||0)||String(a.id).localeCompare(String(b.id));
+    const patches={};
+    ["Office","Factory"].forEach(src=>{
+      const groups={};
+      live.filter(o=>orderSourceOf(o)===src).forEach(o=>{const g=o.groupId||o.id;(groups[g]=groups[g]||[]).push(o);});
+      Object.values(groups).map(m=>m.sort(byCreated)).sort((a,b)=>byCreated(a[0],b[0]))
+        .forEach((m,i)=>m.forEach((o,j)=>{patches[o.id]={orderNum:i+1,orderSuffix:orderSuffixForIndex(j)};}));
+    });
+    const ids=Object.keys(patches);
+    if(window.db){
+      try{
+        for(let i=0;i<ids.length;i+=400){
+          const batch=window.db.batch();
+          ids.slice(i,i+400).forEach(id=>batch.update(window.db.collection("orders").doc(id),patches[id]));
+          await batch.commit();
+        }
+      }catch(e){toast2("Reset failed: "+e.message,"err");return;}
+    }else{
+      setOrders(p=>p.map(o=>patches[o.id]?{...o,...patches[o.id]}:o));
+    }
+    toast2(ids.length?"Order numbers reset — next order continues after the last one":"Order numbers reset — next order will be 001");
   };
 
   if(!authChecked)return(
@@ -974,15 +942,15 @@ function App(){
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
           {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office" wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer}/>}
-          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} bulkSetStatus={bulkSetStatus} toast2={toast2} user={user} initialOrderId={pendingOrderId} onConsumeInitialOrder={()=>setPendingOrderId(null)}/>}
+          {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user} initialOrderId={pendingOrderId} onConsumeInitialOrder={()=>setPendingOrderId(null)}/>}
           {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
           {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2} user={user}/>}
           {page==="wholesale"&&<Wholesale orders={activeOrders} allOrders={orders} wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer} updWholesaleCustomer={updWholesaleCustomer} delWholesaleCustomer={delWholesaleCustomer} addOrder={addOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2} openOrder={openOrderInList}/>}
           {page==="receive"&&<Receive orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="deliver"&&<Deliver orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
-          {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={activeOrders} allOrders={orders} openOrder={openOrderInList}/>}
+          {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={activeOrders}/>}
           {page==="staff"&&user.role==="Admin"&&<StaffAccounts user={user} toast2={toast2}/>}
-          {page==="trash"&&user.role==="Admin"&&<Trash orders={trashedOrders} allOrders={orders} restoreOrder={restoreOrder} permanentDeleteOrder={permanentDeleteOrder} toast2={toast2}/>}
+          {page==="trash"&&user.role==="Admin"&&<Trash orders={trashedOrders} allOrders={orders} restoreOrder={restoreOrder} permanentDeleteOrder={permanentDeleteOrder} resetOrderNumbers={resetOrderNumbers} toast2={toast2}/>}
         </main>
       </div>
       {toast&&<div style={{position:"fixed",bottom:24,right:24,background:toast.type==="ok"?"#1d9e75":"#cc0000",color:"#fff",padding:"12px 20px",borderRadius:12,fontSize:13.5,fontWeight:600,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,.15)",maxWidth:320}}>
@@ -995,7 +963,6 @@ function App(){
 // ── DASHBOARD ──
 function Dashboard({orders,goto,user}){
   const canViewFinancial=["Admin","Accountant"].includes(user.role);
-  const [showRevenue,setShowRevenue]=useState(false); // Today's Revenue stays hidden until the eye is tapped
   const isOfficeOrFactory=["Office Staff","Factory Staff"].includes(user.role);
   const tKey=todayKey();
   const todayOrders=orders.filter(o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===tKey;});
@@ -1003,11 +970,9 @@ function Dashboard({orders,goto,user}){
   const todayAdvOrders=todayOrders.filter(o=>Number(o.advance)>0);
   const sales=todayOrders.reduce((a,o)=>a+orderTotalOf(o),0);
   // Revenue = Cash + UPI + Other Payments actually received today (product amount only — Design Revenue is tracked separately below and must not be mixed in here).
-  // Uses deliveryPaymentOf (total − advance − pending) instead of the full order value, so an order
-  // that got both an advance AND a final payment today doesn't have its advance counted twice.
-  const cashCollected=todayDelivered.filter(o=>o.payMethod==="Cash").reduce((a,o)=>a+deliveryPaymentOf(o),0)+todayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash").reduce((a,o)=>a+Number(o.advance||0),0);
-  const upiCollected=todayDelivered.filter(o=>o.payMethod==="UPI").reduce((a,o)=>a+deliveryPaymentOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod==="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
-  const otherCollected=todayDelivered.filter(o=>o.payMethod&&o.payMethod!=="Cash"&&o.payMethod!=="UPI").reduce((a,o)=>a+deliveryPaymentOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod&&o.advPayMethod!=="Cash"&&o.advPayMethod!=="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
+  const cashCollected=todayDelivered.filter(o=>o.payMethod==="Cash").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>!o.advPayMethod||o.advPayMethod==="Cash").reduce((a,o)=>a+Number(o.advance||0),0);
+  const upiCollected=todayDelivered.filter(o=>o.payMethod==="UPI").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod==="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
+  const otherCollected=todayDelivered.filter(o=>o.payMethod&&o.payMethod!=="Cash"&&o.payMethod!=="UPI").reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrders.filter(o=>o.advPayMethod&&o.advPayMethod!=="Cash"&&o.advPayMethod!=="UPI").reduce((a,o)=>a+Number(o.advance||0),0);
   // Today's Revenue = total worth of every order placed today (product + design), i.e. the full order value —
   // this already includes outstanding balances and advance received, not just money actually collected.
   const todayRevenue=sales;
@@ -1054,10 +1019,7 @@ function Dashboard({orders,goto,user}){
           <div style={{display:"flex",justifyContent:"space-between",alignItems:"flex-start",gap:12,flexWrap:"wrap",marginBottom:16}}>
             <div>
               <div style={{fontSize:11,color:"#ffb3b3",fontWeight:700,textTransform:"uppercase",letterSpacing:.5}}>Today's Revenue (Total Order Value)</div>
-              <div style={{display:"flex",alignItems:"center",gap:12,marginTop:4}}>
-                <div style={{fontSize:32,fontWeight:900,color:"#fff",letterSpacing:showRevenue?0:2}}>{showRevenue?fmtM(todayRevenue):"₹ ••••••"}</div>
-                <button type="button" onClick={()=>setShowRevenue(v=>!v)} title={showRevenue?"Hide amount":"Show amount"} style={{background:"#2a2a2a",border:"1px solid #3a3a3a",borderRadius:10,width:38,height:38,display:"flex",alignItems:"center",justifyContent:"center",cursor:"pointer",color:"#ddd",fontSize:20}}><i className={`ti ${showRevenue?"ti-eye":"ti-eye-off"}`}/></button>
-              </div>
+              <div style={{fontSize:32,fontWeight:900,marginTop:4,color:"#fff"}}>{fmtM(todayRevenue)}</div>
               <div style={{fontSize:10.5,color:"#777",marginTop:3}}>Total worth of every order placed today — includes outstanding balances and advance received</div>
               <div style={{fontSize:12,color:"#bbb",marginTop:4}}>{todayOrders.length} orders · {totalQty} items</div>
             </div>
@@ -1199,43 +1161,9 @@ function PermanentDeleteConfirm({order,onConfirm,onCancel}){
   );
 }
 
-// ── BULK STATUS OVERRIDE MODAL (Admin) ── Lets Admin pick a target status to apply to every
-// selected order in one shot — for catching up orders stuck behind a missed factory step.
-function BulkStatusModal({count,onConfirm,onCancel}){
-  const [target,setTarget]=useState(S.DELI);
-  const options=[
-    {v:S.PROD,label:"In Production",desc:"Marks orders as Accepted by Factory"},
-    {v:S.TRANSIT,label:"In Transit",desc:"Marks orders as Accepted + Dispatched"},
-    {v:S.RECV,label:"Received at Office",desc:"Marks orders as Accepted + Dispatched + Received"},
-    {v:S.DELI,label:"Delivered & Paid",desc:"Marks orders fully complete — Pending cleared to ₹0"},
-  ];
-  return(
-    <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.55)",zIndex:400,display:"flex",alignItems:"center",justifyContent:"center",padding:16}} onClick={onCancel}>
-      <div className="card" style={{maxWidth:420,width:"100%"}} onClick={e=>e.stopPropagation()}>
-        <div style={{fontWeight:800,fontSize:16,marginBottom:4}}>Bulk Status Override</div>
-        <div style={{fontSize:12.5,color:"#888",marginBottom:16}}>{count} order{count===1?"":"s"} selected. This skips the normal step-by-step workflow — use it to catch up orders stuck behind a missed factory scan.</div>
-        <div style={{display:"flex",flexDirection:"column",gap:8,marginBottom:16}}>
-          {options.map(o=>(
-            <button key={o.v} type="button" onClick={()=>setTarget(o.v)} style={{textAlign:"left",padding:"11px 14px",borderRadius:12,border:target===o.v?"1.5px solid #cc0000":"1.5px solid #e0ddd8",background:target===o.v?"#fff5f5":"#fff",cursor:"pointer",fontFamily:"inherit"}}>
-              <div style={{fontWeight:700,fontSize:13.5,color:target===o.v?"#cc0000":"#1a1a1a"}}>{o.label}</div>
-              <div style={{fontSize:11.5,color:"#999",marginTop:2}}>{o.desc}</div>
-            </button>
-          ))}
-        </div>
-        <div style={{background:"#fff3e0",border:"1px solid #ffd9a0",borderRadius:10,padding:"9px 12px",fontSize:12,color:"#a35a00",marginBottom:18}}>
-          <i className="ti ti-alert-triangle" style={{marginRight:6}}/>Any skipped steps (Accept / Dispatch / Receive / Deliver) are auto-filled with your name and the current time, and logged in each order's History as a Bulk Status Override.
-        </div>
-        <div style={{display:"flex",gap:10}}>
-          <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={onCancel}>Cancel</button>
-          <button className="btn btn-red" style={{flex:1,justifyContent:"center"}} onClick={()=>onConfirm(target)}><i className="ti ti-check"/>Apply to {count}</button>
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
+function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,resetOrderNumbers,toast2}){
   const [q,setQ]=useState("");
+  const [resetOpen,setResetOpen]=useState(false);
   const [restoreTarget,setRestoreTarget]=useState(null);
   const [permTarget,setPermTarget]=useState(null);
   const filtered=orders.filter(o=>{
@@ -1263,6 +1191,18 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
           </div>
         </div>
       )}
+      {resetOpen&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"#fff",borderRadius:16,padding:24,maxWidth:380,width:"100%",textAlign:"center",border:"2px solid #cc0000"}}>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:8,color:"#cc0000"}}>Reset Order Numbers?</div>
+            <div style={{fontSize:12.5,color:"#666",marginBottom:18}}>All current orders are renumbered from 001 (Office) and F001 (Factory), oldest first. New orders continue from there. This can't be undone — export a backup first if unsure.</div>
+            <div style={{display:"flex",gap:10}}>
+              <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={()=>setResetOpen(false)}>Cancel</button>
+              <button className="btn btn-red" style={{flex:1,justifyContent:"center"}} onClick={()=>{setResetOpen(false);resetOrderNumbers();}}>Reset Now</button>
+            </div>
+          </div>
+        </div>
+      )}
       {permTarget&&<PermanentDeleteConfirm order={permTarget} onCancel={()=>setPermTarget(null)} onConfirm={()=>{permanentDeleteOrder(permTarget.id);setPermTarget(null);}}/>}
 
       <div className="card" style={{marginBottom:16,background:"#1a1a1a",border:"none",color:"#fff"}}>
@@ -1273,7 +1213,10 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
             <div style={{fontSize:12,color:"#bbb",marginTop:2}}>{orders.length} trashed order{orders.length===1?"":"s"} · backup includes active and trashed orders</div>
             <div style={{fontSize:11,color:"#ff8866",marginTop:4}}><i className="ti ti-clock" style={{marginRight:5}}/>Orders in Trash are permanently deleted after 30 days</div>
           </div>
-          <button className="btn btn-red" onClick={()=>{exportOrdersBackup(allOrders);toast2("Backup file downloaded");}}><i className="ti ti-download"/>Export Backup</button>
+          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
+            <button className="btn btn-outline" style={{background:"#252525",color:"#fff",borderColor:"#555"}} onClick={()=>setResetOpen(true)}><i className="ti ti-refresh"/>Reset Order Numbers</button>
+            <button className="btn btn-red" onClick={()=>{exportOrdersBackup(allOrders);toast2("Backup file downloaded");}}><i className="ti ti-download"/>Export Backup</button>
+          </div>
         </div>
       </div>
 
@@ -1720,7 +1663,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
   // #001,#002... for Office and F001,F002... for Factory — so the suggestion must only look
   // at orders from the same source, otherwise a busy Office series would push Factory's
   // suggested number far ahead (and vice versa).
-  const usedNums=numberSource.filter(o=>orderSourceOf(o)===orderSource).map(o=>o.orderNum).filter(Boolean);
+  const usedNums=numberSource.filter(o=>!isTrashed(o)&&orderSourceOf(o)===orderSource).map(o=>o.orderNum).filter(Boolean);
   const suggestNum=usedNums.length>0?Math.max(...usedNums)+1:1;
 
   // ── Order Type ── When orderType is passed in explicitly (the "New Wholesale Order" flow launched
@@ -2376,7 +2319,7 @@ function EditOrder({order,orders,onSave,onCancel,toast2}){
 }
 
 // ── ORDER LIST ──
-function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,bulkSetStatus,toast2,user,initialOrderId,onConsumeInitialOrder}){
+function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,toast2,user,initialOrderId,onConsumeInitialOrder}){
   const [q,setQ]=useState("");
   const [fl,setFl]=useState("all");
   const [typeFl,setTypeFl]=useState("all");
@@ -2398,7 +2341,6 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,b
   const [bulkMode,setBulkMode]=useState(false);
   const [selectedIds,setSelectedIds]=useState(new Set());
   const [expandedGroups,setExpandedGroups]=useState(new Set());
-  const [statusModalOpen,setStatusModalOpen]=useState(false);
   const isAdmin=user.role==="Admin";
 
   const matchQ=(o,q)=>{
@@ -2484,10 +2426,6 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,b
     return result;
   },[orders,q,fl,typeFl,sourceFl,woodFl]);
 
-  // ── Select All support — every order (incl. all sizes) currently visible after search/filters ──
-  const visibleIds=useMemo(()=>groupedFiltered.flatMap(g=>[g.primary.id,...g.subs.map(x=>x.id)]),[groupedFiltered]);
-  const allVisibleSelected=visibleIds.length>0&&visibleIds.every(id=>selectedIds.has(id));
-  const toggleSelectAll=()=>setSelectedIds(allVisibleSelected?new Set():new Set(visibleIds));
   const toggleGroup=gid=>setExpandedGroups(p=>{const n=new Set(p);n.has(gid)?n.delete(gid):n.add(gid);return n;});
   const todayKeyNow=todayKey();
   const isTodayOrder=o=>{const p=parseLocaleDate(o.created);return p&&p.dateKey===todayKeyNow;};
@@ -2497,7 +2435,7 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,b
   // Today's Revenue = Cash + UPI + Other Payments received today (excludes Design Revenue), same definition as the Dashboard — payments received today only, each counted once.
   const todayDeliveredOL=sourceOrders.filter(o=>{const p=parseLocaleDate(o.deliveredAt);return p&&p.dateKey===todayKeyNow;});
   const todayAdvOrdersOL=todayOrders.filter(o=>Number(o.advance)>0);
-  const todayRevenue=todayDeliveredOL.reduce((a,o)=>a+deliveryPaymentOf(o),0)+todayAdvOrdersOL.reduce((a,o)=>a+Number(o.advance||0),0);
+  const todayRevenue=todayDeliveredOL.reduce((a,o)=>a+productTotalOf(o),0)+todayAdvOrdersOL.reduce((a,o)=>a+Number(o.advance||0),0);
   const summary=[
     ["Today's Orders",todayOrders.length,"ti-calendar-plus","#0f766e"],
     ["Pending",sourceOrders.filter(o=>o.status===S.PEND).length,"ti-clock-pause","#dc2626"],
@@ -2762,20 +2700,13 @@ function OrderList({orders,allOrders,updOrder,updOrderH,delOrder,bulkDelOrders,b
         <div style={{background:"#111827",borderRadius:16,padding:"13px 16px",marginBottom:14,display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:10,boxShadow:"0 10px 28px rgba(17,24,39,.18)"}}>
           <div style={{color:"#fff",fontSize:13,fontWeight:800}}>{selectedIds.size} selected</div>
           <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button className="btn" style={{fontSize:12,background:allVisibleSelected?"#374151":"#fff",color:allVisibleSelected?"#fff":"#111827"}} onClick={toggleSelectAll} disabled={!visibleIds.length}>
-              <i className={`ti ${allVisibleSelected?"ti-square-off":"ti-checks"}`}/>{allVisibleSelected?"Deselect All":`Select All (${visibleIds.length})`}
-            </button>
             <button className="btn btn-outline" style={{fontSize:12,color:"#cbd5e1",borderColor:"#374151",background:"#1f2937"}} onClick={()=>setSelectedIds(new Set())}>Clear</button>
-            <button className="btn" style={{fontSize:13,background:"#6a1bb5",color:"#fff",opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>setStatusModalOpen(true)}>
-              <i className="ti ti-replace"/>Set Status
-            </button>
-            <button className="btn btn-red" style={{fontSize:13,opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>{if(!window.confirm("Move "+selectedIds.size+" order"+(selectedIds.size===1?"":"s")+" to Trash? You can restore them from Trash within 30 days."))return;bulkDelOrders([...selectedIds]);setSelectedIds(new Set());setBulkMode(false);}}>
+            <button className="btn btn-red" style={{fontSize:13,opacity:selectedIds.size?1:.5}} disabled={!selectedIds.size} onClick={()=>{bulkDelOrders([...selectedIds]);setSelectedIds(new Set());setBulkMode(false);}}>
               <i className="ti ti-trash"/>Delete Selected
             </button>
           </div>
         </div>
       )}
-      {statusModalOpen&&<BulkStatusModal count={selectedIds.size} onCancel={()=>setStatusModalOpen(false)} onConfirm={target=>{bulkSetStatus([...selectedIds],target);setSelectedIds(new Set());setBulkMode(false);setStatusModalOpen(false);}}/>}
       <div style={{display:"flex",flexDirection:"column",gap:14}}>
         {groupedFiltered.length===0&&<div style={{textAlign:"center",padding:48,color:"#94a3b8",background:"#fff",borderRadius:16,border:"1px solid #edf0f4",boxShadow:"0 12px 30px rgba(15,23,42,.05)"}}>{sourceFl==="Factory"?"No Factory orders found":"No orders found"}</div>}
         {groupedFiltered.map(({primary:o,subs})=>{
@@ -4188,7 +4119,7 @@ function parseLocaleDateMs(str){
 const todayKey=()=>{const d=new Date();return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;};
 
 // ── CUSTOMER TAB (used inside Reports) ──
-function CustomerTab({orders,custQ,setCustQ,openOrder}){
+function CustomerTab({orders,custQ,setCustQ}){
   const [expanded,setExpanded]=useState(null); // mobile key of expanded customer
 
   const allCustomers=useMemo(()=>{
@@ -4253,7 +4184,7 @@ function CustomerTab({orders,custQ,setCustQ,openOrder}){
                 <div style={{borderTop:"1px solid #f5f2ee",padding:"8px 16px 14px"}}>
                   <div style={{display:"flex",flexDirection:"column",gap:0}}>
                     {c.orders.map((o,i)=>(
-                      <div key={o.id} onClick={()=>openOrder&&openOrder(o)} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<c.orders.length-1?"1px solid #f5f2ee":"none",flexWrap:"wrap",gap:6,cursor:openOrder?"pointer":"default"}}>
+                      <div key={o.id} style={{display:"flex",justifyContent:"space-between",alignItems:"center",padding:"9px 0",borderBottom:i<c.orders.length-1?"1px solid #f5f2ee":"none",flexWrap:"wrap",gap:6}}>
                         <div style={{display:"flex",alignItems:"center",gap:10,flex:1,minWidth:0}}>
                           {o.orderNum&&<span style={{fontWeight:900,color:"#cc0000",fontSize:13,flexShrink:0}}>{displayOrderNum(o,orders)}</span>}
                           {isFactoryOrder(o)&&<FactoryOrderBadge/>}
@@ -4284,7 +4215,7 @@ function CustomerTab({orders,custQ,setCustQ,openOrder}){
 }
 
 // ── REPORTS ──
-function Reports({orders,allOrders,openOrder}){
+function Reports({orders}){
   const [tab,setTab]=useState("daily");
   const [dateSel,setDateSel]=useState(todayKey());
   const [custQ,setCustQ]=useState("");
@@ -4307,12 +4238,12 @@ function Reports({orders,allOrders,openOrder}){
     if(k==="status") return <StatusBadge s={v}/>;
     return v||"—";
   };
-  const Table=({rows,cols,onRowClick})=>rows.length===0
+  const Table=({rows,cols})=>rows.length===0
     ?<div style={{textAlign:"center",padding:40,color:"#bbb",background:"#fff",borderRadius:14}}>No records</div>
     :<div style={{background:"#fff",borderRadius:14,border:"1px solid #eeebe6",overflow:"hidden"}}><div style={{overflowX:"auto"}}>
       <table style={{width:"100%",borderCollapse:"collapse"}}>
         <thead><tr style={{background:"#fafaf8"}}>{cols.map(c=><th key={c} style={{padding:"9px 10px",textAlign:"left",fontWeight:600,color:"#bbb",fontSize:11,borderBottom:"1px solid #eeebe6"}}>{labels[c]||c}</th>)}</tr></thead>
-        <tbody>{rows.map(o=><tr key={o.id} onClick={onRowClick?()=>onRowClick(o):undefined} style={{borderBottom:"1px solid #fafaf8",cursor:onRowClick?"pointer":"default"}}>{cols.map(c=><td key={c} className={c==="size"?"size-strong-sm":""} style={{padding:"9px 10px",fontSize:c==="size"?14:12.5,fontWeight:c==="size"?900:c==="orderNum"?700:400,color:c==="orderNum"?"#cc0000":c==="id"?"#888":c==="pending"&&o.pending>0?"#cc0000":c==="size"?"#111":"#333"}}>{fv(c,o[c],o)}</td>)}</tr>)}</tbody>
+        <tbody>{rows.map(o=><tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>{cols.map(c=><td key={c} className={c==="size"?"size-strong-sm":""} style={{padding:"9px 10px",fontSize:c==="size"?14:12.5,fontWeight:c==="size"?900:c==="orderNum"?700:400,color:c==="orderNum"?"#cc0000":c==="id"?"#888":c==="pending"&&o.pending>0?"#cc0000":c==="size"?"#111":"#333"}}>{fv(c,o[c],o)}</td>)}</tr>)}</tbody>
       </table></div></div>;
 
   // ── DAILY TAB ──
@@ -4324,9 +4255,8 @@ function Reports({orders,allOrders,openOrder}){
   const cashOrders=dayDeli.filter(o=>o.payMethod==="Cash");
   const upiOrders=dayDeli.filter(o=>o.payMethod==="UPI");
   const otherOrders=dayDeli.filter(o=>o.payMethod&&o.payMethod!=="Cash"&&o.payMethod!=="UPI");
-  // deliveryPaymentOf, not orderTotalOf — a partially-paid order shouldn't count its still-pending balance as collected.
-  const cashTotal=cashOrders.reduce((a,o)=>a+deliveryPaymentOf(o),0);
-  const upiTotal=upiOrders.reduce((a,o)=>a+deliveryPaymentOf(o),0);
+  const cashTotal=cashOrders.reduce((a,o)=>a+orderTotalOf(o),0);
+  const upiTotal=upiOrders.reduce((a,o)=>a+orderTotalOf(o),0);
   const atOffice=dayDeli.filter(o=>o.deliveredLocation==="At Office").length;
   const atProduction=dayDeli.filter(o=>o.deliveredLocation==="At Production").length;
 
@@ -4395,8 +4325,8 @@ function Reports({orders,allOrders,openOrder}){
     const m=getMonthEntry(p.monthKey);
     m.label=m.label||p.monthLabel;
     m.orders.push(o);
-    if(o.payMethod==="Cash"){m.cashCount++;m.cashTotal+=deliveryPaymentOf(o);}
-    if(o.payMethod==="UPI"){m.upiCount++;m.upiTotal+=deliveryPaymentOf(o);}
+    if(o.payMethod==="Cash"){m.cashCount++;m.cashTotal+=orderTotalOf(o);}
+    if(o.payMethod==="UPI"){m.upiCount++;m.upiTotal+=orderTotalOf(o);}
     if(o.deliveredLocation==="At Office")m.office++;
     if(o.deliveredLocation==="At Production")m.production++;
   });
@@ -4477,7 +4407,7 @@ function Reports({orders,allOrders,openOrder}){
                 <div style={{width:32,height:32,borderRadius:9,background:"#faeeda",display:"flex",alignItems:"center",justifyContent:"center"}}><i className="ti ti-building-bank" style={{color:"#854f0b",fontSize:16}}/></div>
                 <div style={{fontSize:11,color:"#999",fontWeight:600}}>Other</div>
               </div>
-              <div style={{fontSize:22,fontWeight:700,color:"#854f0b"}}>{fmtM(otherOrders.reduce((a,o)=>a+deliveryPaymentOf(o),0))}</div>
+              <div style={{fontSize:22,fontWeight:700,color:"#854f0b"}}>{fmtM(otherOrders.reduce((a,o)=>a+orderTotalOf(o),0))}</div>
               <div style={{fontSize:11.5,color:"#bbb",marginTop:2}}>{otherOrders.length} order{otherOrders.length===1?"":"s"}</div>
             </div>}
           </div>
@@ -4539,8 +4469,7 @@ function Reports({orders,allOrders,openOrder}){
             )}
           </div>
 
-          <div style={{fontSize:12,fontWeight:700,color:"#888",textTransform:"uppercase",letterSpacing:.5,marginBottom:10}}>All Orders Placed This Day ({dayPlaced.length}) · Tap a row to open it</div>
-          <Table rows={dayPlaced} cols={["orderNum","factoryOrder","created","id","customer","product","size","qty","designType","designCost","total","status","payMethod","deliveryCollectionLocation","deliveredLocation","deliveredAt"]} onRowClick={openOrder}/>
+          <Table rows={dayDeli} cols={["orderNum","factoryOrder","created","id","customer","product","size","qty","designType","designCost","total","payMethod","deliveryCollectionLocation","deliveredLocation","deliveredAt"]}/>
         </div>
       )}
 
@@ -4610,33 +4539,33 @@ function Reports({orders,allOrders,openOrder}){
           <div style={{background:"#fff8f8",border:"1px solid #ffe0e0",borderRadius:12,padding:"11px 16px",marginBottom:14,fontWeight:700,color:"#cc0000",fontSize:14}}>
             Total Pending: {fmtM(pend.reduce((a,o)=>a+o.pending,0))}
           </div>
-          <Table rows={pend} cols={["orderNum","factoryOrder","created","id","customer","mobile","size","deliveryCollectionLocation","designType","designCost","total","advance","pending","status"]} onRowClick={openOrder}/>
+          <Table rows={pend} cols={["orderNum","factoryOrder","created","id","customer","mobile","size","deliveryCollectionLocation","designType","designCost","total","advance","pending","status"]}/>
         </div>
       )}
 
-      {tab==="delivered"&&<Table rows={deli} cols={["orderNum","factoryOrder","created","id","customer","product","wood","size","qty","deliveryCollectionLocation","designType","designCost","total","payMethod","deliveredLocation","deliveredAt"]} onRowClick={openOrder}/>}
+      {tab==="delivered"&&<Table rows={deli} cols={["orderNum","factoryOrder","created","id","customer","product","wood","size","qty","deliveryCollectionLocation","designType","designCost","total","payMethod","deliveredLocation","deliveredAt"]}/>}
 
       {tab==="customers"&&(
-        <CustomerTab orders={orders} custQ={custQ} setCustQ={setCustQ} openOrder={openOrder}/>
+        <CustomerTab orders={orders} custQ={custQ} setCustQ={setCustQ}/>
       )}
 
       {tab==="design"&&(
-        <DesignRevenueTab orders={orders} openOrder={openOrder}/>
+        <DesignRevenueTab orders={orders}/>
       )}
 
       {tab==="wholesale"&&(
-        <WholesaleReportTab orders={orders} openOrder={openOrder}/>
+        <WholesaleReportTab orders={orders}/>
       )}
 
       {tab==="feedback"&&(
-        <FeedbackTab orders={orders} rated={rated} openOrder={openOrder}/>
+        <FeedbackTab orders={orders} rated={rated}/>
       )}
     </div>
   );
 }
 
 // ── DESIGN REVENUE TAB (Reports) ──
-function DesignRevenueTab({orders,openOrder}){
+function DesignRevenueTab({orders}){
   const [range,setRange]=useState("today");
   const [dateFrom,setDateFrom]=useState(todayKey());
   const [dateTo,setDateTo]=useState(todayKey());
@@ -4738,7 +4667,7 @@ function DesignRevenueTab({orders,openOrder}){
             </tr></thead>
             <tbody>
               {filtered.map(o=>(
-                <tr key={o.id} onClick={()=>openOrder&&openOrder(o)} style={{borderBottom:"1px solid #fafaf8",cursor:openOrder?"pointer":"default"}}>
+                <tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>
                   <td style={{padding:"9px 10px",fontWeight:900,color:"#cc0000"}}>{displayOrderNum(o,orders)}</td>
                   <td style={{padding:"9px 10px",fontWeight:600}}>{o.customer}</td>
                   <td style={{padding:"9px 10px",color:"#a35a00",fontWeight:600}}>{o.designType||"—"}</td>
@@ -4762,7 +4691,7 @@ function DesignRevenueTab({orders,openOrder}){
 
 // ── WHOLESALE REPORT TAB (Reports) ── Wholesale orders already count in every other report
 // (Daily/Monthly totals include them like any order); this tab isolates them for a focused view.
-function WholesaleReportTab({orders,openOrder}){
+function WholesaleReportTab({orders}){
   const [range,setRange]=useState("month");
   const [dateFrom,setDateFrom]=useState(todayKey());
   const [dateTo,setDateTo]=useState(todayKey());
@@ -4859,7 +4788,7 @@ function WholesaleReportTab({orders,openOrder}){
             </tr></thead>
             <tbody>
               {filtered.map(o=>(
-                <tr key={o.id} onClick={()=>openOrder&&openOrder(o)} style={{borderBottom:"1px solid #fafaf8",cursor:openOrder?"pointer":"default"}}>
+                <tr key={o.id} style={{borderBottom:"1px solid #fafaf8"}}>
                   <td style={{padding:"9px 10px",fontWeight:900,color:"#cc0000"}}>{displayOrderNum(o,orders)}</td>
                   <td style={{padding:"9px 10px",fontWeight:600}}>{o.customer}</td>
                   <td style={{padding:"9px 10px"}}>{fmtM(orderTotalOf(o))}</td>
@@ -4882,7 +4811,7 @@ function WholesaleReportTab({orders,openOrder}){
 }
 
 // ── FEEDBACK TAB (rating analytics) ──
-function FeedbackTab({orders,rated,openOrder}){
+function FeedbackTab({orders,rated}){
   const deliCount=orders.filter(o=>o.status===S.DELI).length;
   const sentCount=orders.filter(o=>o.feedbackSent).length;
   const avgRating=rated.length?(rated.reduce((a,o)=>a+o.customerRating,0)/rated.length):0;
@@ -4946,7 +4875,7 @@ function FeedbackTab({orders,rated,openOrder}){
       <div style={{display:"flex",flexDirection:"column",gap:9}}>
         {rated.length===0&&<div style={{textAlign:"center",padding:30,color:"#bbb",background:"#fff",borderRadius:14}}>No ratings received yet</div>}
         {rated.slice().reverse().map(o=>(
-          <div key={o.id} className="card" onClick={()=>openOrder&&openOrder(o)} style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8,cursor:openOrder?"pointer":"default"}}>
+          <div key={o.id} className="card" style={{padding:"12px 16px",display:"flex",justifyContent:"space-between",alignItems:"center",flexWrap:"wrap",gap:8}}>
             <div>
               <div style={{fontWeight:600,fontSize:13}}>{o.customer}</div>
               <div style={{fontSize:11,color:"#bbb"}}>{o.orderNum?displayOrderNum(o,orders)+" · ":""}{o.product}</div>
