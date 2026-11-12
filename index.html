@@ -1711,7 +1711,8 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
   const [mobile,setMobile]=useState(presetCustomer?.mobile||"");
   const [delivery,setDelivery]=useState(todayKey());
   const [deliveryCollectionLocation,setDeliveryCollectionLocation]=useState("");
-  const [orderNumInput,setOrderNumInput]=useState(String(suggestNum));
+  const pad3=n=>String(n).padStart(3,"0");
+  const [orderNumInput,setOrderNumInput]=useState(pad3(suggestNum));
   const [items,setItems]=useState([emptyItem()]);
   const [done,setDone]=useState(null);
   const [draftLoaded,setDraftLoaded]=useState(false);
@@ -1874,7 +1875,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
     created.forEach((o,i)=>{if(i>0)o.groupId=groupId;});
     created[0].groupId=groupId;
     const chk=await reserveOrderNumber(num,orderSource,groupId);
-    if(!chk.ok){toast2("Order number "+fmtONForSource(num,orderSource)+" was just taken by someone else — use the next number","err");setOrderNumInput(String(Math.max(suggestNum,num+1)));return;}
+    if(!chk.ok){toast2("Order number "+fmtONForSource(num,orderSource)+" was just taken by someone else — use the next number","err");setOrderNumInput(pad3(Math.max(suggestNum,num+1)));return;}
     Promise.all(created.map(o=>onAdd(o))).then(()=>{clearDraft();setDone(created);if(onDone)onDone(created);});
   };
 
@@ -1917,7 +1918,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
             <button className="btn btn-green" style={{padding:"7px 12px",fontSize:12}} onClick={()=>downloadQR(done[0])}><i className="ti ti-download"/>Download</button>
           </div>
         </div>
-        <button className="btn btn-outline" onClick={()=>{setDone(null);if(!orderTypeLocked&&!wsCustId){setCustomer(presetCustomer?.name||"");setMobile(presetCustomer?.mobile||"");}setDelivery(todayKey());setDeliveryCollectionLocation("");setOrderNumInput(String(suggestNum+1));setItems([emptyItem()]);clearDraft();}}><i className="ti ti-plus"/>{isWholesaleOrder(done[0])?"New Order for this Party":"New Order"}</button>
+        <button className="btn btn-outline" onClick={()=>{setDone(null);if(!orderTypeLocked&&!wsCustId){setCustomer(presetCustomer?.name||"");setMobile(presetCustomer?.mobile||"");}setDelivery(todayKey());setDeliveryCollectionLocation("");setOrderNumInput(pad3(suggestNum+1));setItems([emptyItem()]);clearDraft();}}><i className="ti ti-plus"/>{isWholesaleOrder(done[0])?"New Order for this Party":"New Order"}</button>
       </div>
     </div>
   );
@@ -2042,7 +2043,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
                 <label style={LBL}>Order Number *</label>
                 <div style={{display:"flex",gap:8,alignItems:"center"}}>
                   <span style={{fontWeight:700,color:"#cc0000",fontSize:16,flexShrink:0}}>{orderSource==="Factory"?"F":"#"}</span>
-                  <input ref={setRef("orderNum")} onKeyDown={onEnter("orderNum")} className="inp" type="number" value={orderNumInput} onChange={e=>setOrderNumInput(e.target.value)} placeholder={String(suggestNum)} style={{flex:1}}/>
+                  <input ref={setRef("orderNum")} onKeyDown={onEnter("orderNum")} className="inp" type="text" inputMode="numeric" value={orderNumInput} onChange={e=>setOrderNumInput(e.target.value.replace(/\D/g,""))} placeholder={pad3(suggestNum)} style={{flex:1}}/>
                 </div>
                 <div style={{fontSize:10.5,color:"#bbb",marginTop:3}}>Suggested: {fmtONForSource(suggestNum,orderSource)} · Change if needed</div>
               </div>
