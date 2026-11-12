@@ -199,7 +199,31 @@ const matchesOrderNumber=(o,text,orders=[])=>{
   return String(o.orderNum)===t||officeStyleMatch||shown===t||shown.replace("#","")===t||raw===t;
 };
 let NUM_RESET_AT=0; // orders created before this moment belong to the old numbering series
+const NUM_META_ID="_numbering_reset"; // hidden marker doc inside "orders" (no createdTs, so it never shows in lists)
 const inCurrentSeries=o=>(parseLocaleDateMs(o&&o.created)||0)>=NUM_RESET_AT;
+const withTimeout=(p,ms)=>Promise.race([p,new Promise((_,rej)=>setTimeout(()=>rej(new Error("Timed out — check internet connection")),ms))]);
+// Checks the live database (not just this device's copy) and takes an atomic lock on the number,
+// so two people creating orders at the same moment can't both get the same number.
+async function reserveOrderNumber(num,source,groupId){
+  if(!window.db) return {ok:true};
+  try{
+    const snap=await window.db.collection("orders").where("orderNum","==",num).get();
+    const clash=snap.docs.map(d=>({...d.data(),id:d.id})).some(o=>!o.isNumberingMeta&&!o.isNumberingLock&&orderSourceOf(o)===source&&inCurrentSeries(o)&&(o.groupId||o.id)!==groupId);
+    if(clash) return {ok:false};
+  }catch(e){console.error("Number check failed",e);}
+  try{
+    const ref=window.db.collection("orders").doc("_numlock_"+NUM_RESET_AT+"_"+source+"_"+num);
+    await window.db.runTransaction(async tx=>{
+      const d=await tx.get(ref);
+      if(d.exists){const x=d.data();if(x.groupId!==groupId&&Date.now()-(x.at||0)<120000) throw new Error("TAKEN");}
+      tx.set(ref,{isNumberingLock:true,groupId,at:Date.now(),source,num});
+    });
+  }catch(e){
+    if(e&&e.message==="TAKEN") return {ok:false};
+    console.error("Number lock failed",e);
+  }
+  return {ok:true};
+}
 const designCostOf=o=>Number(o&&o.needsDesign?o.designCost:0)||0;
 const productTotalOf=o=>{
   if(o&&o.productTotal!==undefined&&o.productTotal!==null&&o.productTotal!=="") return Number(o.productTotal)||0;
@@ -761,21 +785,22 @@ function App(){
   const [numResetAt,setNumResetAt]=useState(0);
   useEffect(()=>{
     if(!window.db||!user)return;
-    const unsub=window.db.collection("settings").doc("orderNumbering").onSnapshot(d=>{
+    const unsub=window.db.collection("orders").doc(NUM_META_ID).onSnapshot(d=>{
       const t=d.exists?Number(d.data().resetAt)||0:0;
       NUM_RESET_AT=t;setNumResetAt(t);
-    },err=>console.error(err));
+    },err=>console.error("Numbering marker read failed",err));
     return()=>unsub();
   },[user]);
   const resetOrderNumbers=async()=>{
     if(user.role!=="Admin"){toast2("Only Admin can reset order numbers","err");return;}
-    const t=Math.floor(Date.now()/1000)*1000+1000;
+    const t=Math.floor(Date.now()/1000)*1000;
     if(window.db){
-      try{await window.db.collection("settings").doc("orderNumbering").set({resetAt:t,resetBy:user.name,resetAtLabel:now2()});}
+      try{await withTimeout(window.db.collection("orders").doc(NUM_META_ID).set({isNumberingMeta:true,resetAt:t,resetBy:user.name,resetAtLabel:now2()}),10000);}
       catch(e){toast2("Reset failed: "+e.message,"err");return;}
-    }else{NUM_RESET_AT=t;setNumResetAt(t);}
+    }
+    NUM_RESET_AT=t;setNumResetAt(t);
     try{localStorage.removeItem(DRAFT_KEY);}catch(e){}
-    toast2("Done — next Office order is #001, next Factory order is F001");
+    toast2("Order numbers successfully reset. Your next new order will start from #001.");
   };
 
   const toast2=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
@@ -937,7 +962,7 @@ function App(){
         )}
         <main style={{flex:1,overflow:"auto",padding:20}}>
           {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user} resetOrderNumbers={resetOrderNumbers}/>}
-          {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office" wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer}/>}
+          {page==="new-order"&&<NewOrder key={numResetAt} user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office" wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer}/>}
           {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user} initialOrderId={pendingOrderId} onConsumeInitialOrder={()=>setPendingOrderId(null)}/>}
           {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
           {page==="design"&&<Design orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} toast2={toast2} user={user}/>}
@@ -1701,7 +1726,6 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
         const d=JSON.parse(raw);
         if(d.customer||d.mobile||(d.items&&d.items.some(it=>it.dimL||it.qty||it.total))){
           setCustomer(d.customer||"");setMobile(d.mobile||"");setDelivery(d.delivery||todayKey());setDeliveryCollectionLocation(d.deliveryCollectionLocation||"");
-          if(d.orderNumInput) setOrderNumInput(d.orderNumInput);
           if(d.items&&d.items.length) setItems(d.items.map(it=>({...emptyItem(),...it})));
           toast2("Restored your unsaved order draft");
         }
@@ -1813,7 +1837,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
     }
   };
 
-  const sub=e=>{
+  const sub=async e=>{
     e.preventDefault();
     if(isWholesaleFlow&&!orderTypeLocked&&!wsCustId){toast2("Search and select a wholesale party, or create a new one","err");return;}
     if(!customer||!mobile){toast2(isWholesaleFlow?"Select a wholesale party":"Enter customer name and mobile","err");return;}
@@ -1849,6 +1873,8 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
     const groupId=created[0].id;
     created.forEach((o,i)=>{if(i>0)o.groupId=groupId;});
     created[0].groupId=groupId;
+    const chk=await reserveOrderNumber(num,orderSource,groupId);
+    if(!chk.ok){toast2("Order number "+fmtONForSource(num,orderSource)+" was just taken by someone else — use the next number","err");setOrderNumInput(String(Math.max(suggestNum,num+1)));return;}
     Promise.all(created.map(o=>onAdd(o))).then(()=>{clearDraft();setDone(created);if(onDone)onDone(created);});
   };
 
@@ -2965,7 +2991,7 @@ function Factory({orders,allOrders,delOrder,updOrder,updOrderH,user,onAdd,toast2
   if(showNewOrder) return(
     <div>
       <button className="btn btn-outline" style={{marginBottom:14,padding:"7px 14px",fontSize:12}} onClick={()=>setShowNewOrder(false)}>← Back to Factory View</button>
-      <NewOrder user={user} onAdd={onAdd} toast2={toast2} orders={orders} allOrders={allOrders||orders} goto={goto||(()=>setShowNewOrder(false))} defaultSource="Factory"/>
+      <NewOrder key={NUM_RESET_AT} user={user} onAdd={onAdd} toast2={toast2} orders={orders} allOrders={allOrders||orders} goto={goto||(()=>setShowNewOrder(false))} defaultSource="Factory"/>
     </div>
   );
 
@@ -3870,7 +3896,7 @@ function WholesaleCustomerProfile({customer,orders,allOrders,updOrder,updOrderH,
   if(creating) return(
     <div>
       <button className="btn btn-outline" style={{marginBottom:16}} onClick={()=>setCreating(false)}><i className="ti ti-arrow-left"/>Back to {customer.firmName}</button>
-      <NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={allOrders} allOrders={allOrders} defaultSource="Office"
+      <NewOrder key={NUM_RESET_AT} user={user} onAdd={addOrder} toast2={toast2} orders={allOrders} allOrders={allOrders} defaultSource="Office"
         orderType="Wholesale" presetCustomer={{name:customer.firmName,mobile:customer.mobile}} wholesaleCustomerId={customer.id}
         goto={()=>{}} onDone={()=>{}}/>
     </div>
