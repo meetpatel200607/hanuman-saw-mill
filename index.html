@@ -181,7 +181,7 @@ const displayOrderNum=(o,orders=[])=>{
 const orderNumberTaken=(num,source,orders,excludeOrderId,excludeGroupId)=>{
   if(!num) return false;
   return orders.some(o=>{
-    if(isTrashed(o)) return false;
+    if(!inCurrentSeries(o)) return false;
     if(excludeOrderId&&o.id===excludeOrderId) return false;
     const gid=o.groupId||o.id;
     if(excludeGroupId&&gid===excludeGroupId) return false;
@@ -198,6 +198,8 @@ const matchesOrderNumber=(o,text,orders=[])=>{
   const officeStyleMatch=!isFactoryOrder(o)&&(fmtON(o.orderNum).toLowerCase()===t||("#"+String(o.orderNum))===t);
   return String(o.orderNum)===t||officeStyleMatch||shown===t||shown.replace("#","")===t||raw===t;
 };
+let NUM_RESET_AT=0; // orders created before this moment belong to the old numbering series
+const inCurrentSeries=o=>(parseLocaleDateMs(o&&o.created)||0)>=NUM_RESET_AT;
 const designCostOf=o=>Number(o&&o.needsDesign?o.designCost:0)||0;
 const productTotalOf=o=>{
   if(o&&o.productTotal!==undefined&&o.productTotal!==null&&o.productTotal!=="") return Number(o.productTotal)||0;
@@ -756,6 +758,26 @@ function App(){
     }));
   },[]);
 
+  const [numResetAt,setNumResetAt]=useState(0);
+  useEffect(()=>{
+    if(!window.db||!user)return;
+    const unsub=window.db.collection("settings").doc("orderNumbering").onSnapshot(d=>{
+      const t=d.exists?Number(d.data().resetAt)||0:0;
+      NUM_RESET_AT=t;setNumResetAt(t);
+    },err=>console.error(err));
+    return()=>unsub();
+  },[user]);
+  const resetOrderNumbers=async()=>{
+    if(user.role!=="Admin"){toast2("Only Admin can reset order numbers","err");return;}
+    const t=Math.floor(Date.now()/1000)*1000+1000;
+    if(window.db){
+      try{await window.db.collection("settings").doc("orderNumbering").set({resetAt:t,resetBy:user.name,resetAtLabel:now2()});}
+      catch(e){toast2("Reset failed: "+e.message,"err");return;}
+    }else{NUM_RESET_AT=t;setNumResetAt(t);}
+    try{localStorage.removeItem(DRAFT_KEY);}catch(e){}
+    toast2("Done — next Office order is #001, next Factory order is F001");
+  };
+
   const toast2=(msg,type="ok")=>{setToast({msg,type});setTimeout(()=>setToast(null),3500);};
 
   const addOrder=async o=>{
@@ -826,32 +848,6 @@ function App(){
     if(user.role!=="Admin"){toast2("Only Admin can permanently delete","err");return;}
     if(window.db){try{await window.db.collection("orders").doc(id).delete();toast2("Order permanently deleted");}catch(e){toast2("Permanent delete failed","err");}}
     else{setOrders(p=>p.filter(o=>o.id!==id));toast2("Order permanently deleted");}
-  };
-
-  const resetOrderNumbers=async()=>{
-    if(user.role!=="Admin"){toast2("Only Admin can reset order numbers","err");return;}
-    const live=orders.filter(o=>!isTrashed(o));
-    const byCreated=(a,b)=>(parseLocaleDateMs(a.created)||0)-(parseLocaleDateMs(b.created)||0)||String(a.id).localeCompare(String(b.id));
-    const patches={};
-    ["Office","Factory"].forEach(src=>{
-      const groups={};
-      live.filter(o=>orderSourceOf(o)===src).forEach(o=>{const g=o.groupId||o.id;(groups[g]=groups[g]||[]).push(o);});
-      Object.values(groups).map(m=>m.sort(byCreated)).sort((a,b)=>byCreated(a[0],b[0]))
-        .forEach((m,i)=>m.forEach((o,j)=>{patches[o.id]={orderNum:i+1,orderSuffix:orderSuffixForIndex(j)};}));
-    });
-    const ids=Object.keys(patches);
-    if(window.db){
-      try{
-        for(let i=0;i<ids.length;i+=400){
-          const batch=window.db.batch();
-          ids.slice(i,i+400).forEach(id=>batch.update(window.db.collection("orders").doc(id),patches[id]));
-          await batch.commit();
-        }
-      }catch(e){toast2("Reset failed: "+e.message,"err");return;}
-    }else{
-      setOrders(p=>p.map(o=>patches[o.id]?{...o,...patches[o.id]}:o));
-    }
-    toast2(ids.length?"Order numbers reset — next order continues after the last one":"Order numbers reset — next order will be 001");
   };
 
   if(!authChecked)return(
@@ -940,7 +936,7 @@ function App(){
           </div>
         )}
         <main style={{flex:1,overflow:"auto",padding:20}}>
-          {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user}/>}
+          {page==="dashboard"&&<Dashboard orders={activeOrders} goto={goto} user={user} resetOrderNumbers={resetOrderNumbers}/>}
           {page==="new-order"&&<NewOrder user={user} onAdd={addOrder} toast2={toast2} orders={activeOrders} allOrders={orders} goto={goto} defaultSource="Office" wholesaleCustomers={wholesaleCustomers.filter(c=>c.active!==false)} addWholesaleCustomer={addWholesaleCustomer}/>}
           {page==="orders"&&<OrderList orders={activeOrders} allOrders={orders} updOrder={updOrder} updOrderH={updOrderH} delOrder={delOrder} bulkDelOrders={bulkDelOrders} toast2={toast2} user={user} initialOrderId={pendingOrderId} onConsumeInitialOrder={()=>setPendingOrderId(null)}/>}
           {page==="factory"&&<Factory orders={activeOrders} allOrders={orders} delOrder={delOrder} updOrder={updOrder} updOrderH={updOrderH} user={user} onAdd={addOrder} toast2={toast2} goto={goto}/>}
@@ -950,7 +946,7 @@ function App(){
           {page==="deliver"&&<Deliver orders={activeOrders} updOrder={updOrder} updOrderH={updOrderH} user={user} toast2={toast2}/>}
           {page==="reports"&&["Admin","Accountant"].includes(user.role)&&<Reports orders={activeOrders}/>}
           {page==="staff"&&user.role==="Admin"&&<StaffAccounts user={user} toast2={toast2}/>}
-          {page==="trash"&&user.role==="Admin"&&<Trash orders={trashedOrders} allOrders={orders} restoreOrder={restoreOrder} permanentDeleteOrder={permanentDeleteOrder} resetOrderNumbers={resetOrderNumbers} toast2={toast2}/>}
+          {page==="trash"&&user.role==="Admin"&&<Trash orders={trashedOrders} allOrders={orders} restoreOrder={restoreOrder} permanentDeleteOrder={permanentDeleteOrder} toast2={toast2}/>}
         </main>
       </div>
       {toast&&<div style={{position:"fixed",bottom:24,right:24,background:toast.type==="ok"?"#1d9e75":"#cc0000",color:"#fff",padding:"12px 20px",borderRadius:12,fontSize:13.5,fontWeight:600,zIndex:9999,boxShadow:"0 4px 20px rgba(0,0,0,.15)",maxWidth:320}}>
@@ -961,7 +957,8 @@ function App(){
 }
 
 // ── DASHBOARD ──
-function Dashboard({orders,goto,user}){
+function Dashboard({orders,goto,user,resetOrderNumbers}){
+  const [resetOpen,setResetOpen]=useState(false);
   const canViewFinancial=["Admin","Accountant"].includes(user.role);
   const isOfficeOrFactory=["Office Staff","Factory Staff"].includes(user.role);
   const tKey=todayKey();
@@ -1116,6 +1113,21 @@ function Dashboard({orders,goto,user}){
           </button>
         ))}
       </div>
+      {user.role==="Admin"&&<div style={{marginTop:16}}>
+        <button className="btn btn-outline" onClick={()=>setResetOpen(true)}><i className="ti ti-refresh"/>Reset Order Numbers</button>
+      </div>}
+      {resetOpen&&(
+        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
+          <div style={{background:"#fff",borderRadius:16,padding:24,maxWidth:380,width:"100%",textAlign:"center",border:"2px solid #cc0000"}}>
+            <div style={{fontSize:16,fontWeight:800,marginBottom:8,color:"#cc0000"}}>Reset Future Order Numbers?</div>
+            <div style={{fontSize:12.5,color:"#666",marginBottom:18}}>All existing orders and their records will remain unchanged. Only newly created orders will restart from #001 (Office) and F001 (Factory).</div>
+            <div style={{display:"flex",gap:10}}>
+              <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={()=>setResetOpen(false)}>Cancel</button>
+              <button className="btn btn-red" style={{flex:1,justifyContent:"center"}} onClick={()=>{setResetOpen(false);resetOrderNumbers();}}>Reset</button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -1161,9 +1173,8 @@ function PermanentDeleteConfirm({order,onConfirm,onCancel}){
   );
 }
 
-function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,resetOrderNumbers,toast2}){
+function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,toast2}){
   const [q,setQ]=useState("");
-  const [resetOpen,setResetOpen]=useState(false);
   const [restoreTarget,setRestoreTarget]=useState(null);
   const [permTarget,setPermTarget]=useState(null);
   const filtered=orders.filter(o=>{
@@ -1191,18 +1202,6 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,resetOrderNum
           </div>
         </div>
       )}
-      {resetOpen&&(
-        <div style={{position:"fixed",inset:0,background:"rgba(0,0,0,.5)",zIndex:999,display:"flex",alignItems:"center",justifyContent:"center",padding:20}}>
-          <div style={{background:"#fff",borderRadius:16,padding:24,maxWidth:380,width:"100%",textAlign:"center",border:"2px solid #cc0000"}}>
-            <div style={{fontSize:16,fontWeight:800,marginBottom:8,color:"#cc0000"}}>Reset Order Numbers?</div>
-            <div style={{fontSize:12.5,color:"#666",marginBottom:18}}>All current orders are renumbered from 001 (Office) and F001 (Factory), oldest first. New orders continue from there. This can't be undone — export a backup first if unsure.</div>
-            <div style={{display:"flex",gap:10}}>
-              <button className="btn btn-outline" style={{flex:1,justifyContent:"center"}} onClick={()=>setResetOpen(false)}>Cancel</button>
-              <button className="btn btn-red" style={{flex:1,justifyContent:"center"}} onClick={()=>{setResetOpen(false);resetOrderNumbers();}}>Reset Now</button>
-            </div>
-          </div>
-        </div>
-      )}
       {permTarget&&<PermanentDeleteConfirm order={permTarget} onCancel={()=>setPermTarget(null)} onConfirm={()=>{permanentDeleteOrder(permTarget.id);setPermTarget(null);}}/>}
 
       <div className="card" style={{marginBottom:16,background:"#1a1a1a",border:"none",color:"#fff"}}>
@@ -1213,10 +1212,7 @@ function Trash({orders,allOrders,restoreOrder,permanentDeleteOrder,resetOrderNum
             <div style={{fontSize:12,color:"#bbb",marginTop:2}}>{orders.length} trashed order{orders.length===1?"":"s"} · backup includes active and trashed orders</div>
             <div style={{fontSize:11,color:"#ff8866",marginTop:4}}><i className="ti ti-clock" style={{marginRight:5}}/>Orders in Trash are permanently deleted after 30 days</div>
           </div>
-          <div style={{display:"flex",gap:8,flexWrap:"wrap"}}>
-            <button className="btn btn-outline" style={{background:"#252525",color:"#fff",borderColor:"#555"}} onClick={()=>setResetOpen(true)}><i className="ti ti-refresh"/>Reset Order Numbers</button>
-            <button className="btn btn-red" onClick={()=>{exportOrdersBackup(allOrders);toast2("Backup file downloaded");}}><i className="ti ti-download"/>Export Backup</button>
-          </div>
+          <button className="btn btn-red" onClick={()=>{exportOrdersBackup(allOrders);toast2("Backup file downloaded");}}><i className="ti ti-download"/>Export Backup</button>
         </div>
       </div>
 
@@ -1663,7 +1659,7 @@ function NewOrder({user,onAdd,toast2,orders,allOrders,goto,defaultSource,orderTy
   // #001,#002... for Office and F001,F002... for Factory — so the suggestion must only look
   // at orders from the same source, otherwise a busy Office series would push Factory's
   // suggested number far ahead (and vice versa).
-  const usedNums=numberSource.filter(o=>!isTrashed(o)&&orderSourceOf(o)===orderSource).map(o=>o.orderNum).filter(Boolean);
+  const usedNums=numberSource.filter(o=>inCurrentSeries(o)&&orderSourceOf(o)===orderSource).map(o=>o.orderNum).filter(Boolean);
   const suggestNum=usedNums.length>0?Math.max(...usedNums)+1:1;
 
   // ── Order Type ── When orderType is passed in explicitly (the "New Wholesale Order" flow launched
